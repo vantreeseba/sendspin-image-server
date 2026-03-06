@@ -86,11 +86,10 @@ class LocalFolderEndpoint(ImageEndpoint):
         )
 
     async def fetch_next(self) -> bytes:
-        if self._index == 0:
-            self._refresh()
+        self._refresh()
         if not self._files:
-            msg = f"No images found in {self.path}"
-            raise FileNotFoundError(msg)
+            logger.warning("Local endpoint %r: no images in %s, will retry", self.name, self.path)
+            return b""
         self._index = self._index % len(self._files)
         data = self._files[self._index].read_bytes()
         self._index = (self._index + 1) % len(self._files)

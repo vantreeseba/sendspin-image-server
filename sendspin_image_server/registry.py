@@ -322,6 +322,9 @@ class EndpointRegistry:
                 ]
                 if due_clients:
                     data = await endpoint.fetch_next()
+                    if not data:
+                        await asyncio.sleep(1)
+                        continue
                     logger.info(
                         "Endpoint %r: fetched %d bytes, pushing to %d client(s)",
                         endpoint.name, len(data), len(due_clients),
