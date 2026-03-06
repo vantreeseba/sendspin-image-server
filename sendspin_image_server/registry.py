@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import TYPE_CHECKING, Any, cast
 
 from sendspin_image_server.dither import DitheringAlgo
@@ -36,6 +37,7 @@ class EndpointRegistry:
         self._endpoints: dict[str, ImageEndpoint] = {}
         self._assignments: dict[str, str | None] = {}
         self._client_dither: dict[str, DitheringAlgo] = {}  # per-client override
+        self._client_interval: dict[str, float] = {}  # per-client override; 0 = use server default
         self._default_endpoint_id: str | None = None
         self._tasks: dict[str, asyncio.Task[None]] = {}
 
@@ -95,12 +97,15 @@ class EndpointRegistry:
         for client_id, row in assignments.items():
             endpoint_id = row["endpoint_id"]
             dither_algo = row.get("dither_algo", self._dither_algo)
+            interval = float(row.get("interval", 0))
             if endpoint_id in self._endpoints:
                 self._assignments[client_id] = endpoint_id
                 self._client_dither[client_id] = dither_algo  # type: ignore[assignment]
+                self._client_interval[client_id] = interval
                 logger.info(
-                    "Restored assignment: client %s → endpoint %s (dither=%s)",
+                    "Restored assignment: client %s → endpoint %s (dither=%s, interval=%ss)",
                     client_id, endpoint_id, dither_algo,
+                    interval if interval > 0 else "default",
                 )
             else:
                 logger.warning(
@@ -183,8 +188,9 @@ class EndpointRegistry:
             return False
         self._assignments[client_id] = endpoint_id
         algo = self._client_dither.get(client_id, self._dither_algo)
+        interval = self._client_interval.get(client_id, 0)
         if self._db is not None:
-            asyncio.ensure_future(self._db.save_assignment(client_id, endpoint_id, algo))
+            asyncio.ensure_future(self._db.save_assignment(client_id, endpoint_id, algo, interval))
         logger.info("Client %s assigned to endpoint %s", client_id, endpoint_id)
         return True
 
@@ -192,13 +198,30 @@ class EndpointRegistry:
         """Set the dithering algorithm for a specific client and persist it."""
         self._client_dither[client_id] = algo
         endpoint_id = self._assignments.get(client_id)
+        interval = self._client_interval.get(client_id, 0)
         if self._db is not None and endpoint_id:
-            asyncio.ensure_future(self._db.save_assignment(client_id, endpoint_id, algo))
+            asyncio.ensure_future(self._db.save_assignment(client_id, endpoint_id, algo, interval))
         logger.info("Client %s dither algo set to %s", client_id, algo)
+
+    def set_client_interval(self, client_id: str, interval: float) -> None:
+        """Set the slideshow interval for a specific client and persist it.
+
+        Pass 0 to revert to the server-wide default.
+        """
+        self._client_interval[client_id] = interval
+        endpoint_id = self._assignments.get(client_id)
+        algo = self._client_dither.get(client_id, self._dither_algo)
+        if self._db is not None and endpoint_id:
+            asyncio.ensure_future(self._db.save_assignment(client_id, endpoint_id, algo, interval))
+        logger.info("Client %s interval set to %ss", client_id, interval if interval > 0 else "default")
 
     def client_dither_algo(self, client_id: str) -> DitheringAlgo:
         """Return the effective dither algorithm for a client."""
         return cast("DitheringAlgo", self._client_dither.get(client_id, self._dither_algo))
+
+    def client_interval(self, client_id: str) -> float:
+        """Return the effective interval for a client (0 = server default)."""
+        return self._client_interval.get(client_id, 0)
 
     def unassign(self, client_id: str) -> None:
         """Remove explicit assignment; client falls back to default."""
@@ -247,6 +270,7 @@ class EndpointRegistry:
                 "endpoint_name": ep.name if ep else None,
                 "explicit_assignment": self._assignments.get(client.client_id) is not None,
                 "dither_algo": self.client_dither_algo(client.client_id),
+                "interval": self.client_interval(client.client_id),
             })
         return result
 
@@ -280,40 +304,58 @@ class EndpointRegistry:
 
     async def _feed_loop(self, endpoint: ImageEndpoint) -> None:
         logger.info("Feed loop started: %s (%s)", endpoint.name, endpoint.kind)
+        # Track when each client last received an image (monotonic seconds).
+        last_push: dict[str, float] = {}
         while True:
             try:
-                target_clients = [
+                now = time.monotonic()
+                all_clients = [
                     c for c in self._server.clients.values()
                     if c.has_artwork
                     and c.stream_started
                     and self.effective_endpoint_id(c.client_id) == endpoint.endpoint_id
                 ]
-                if target_clients:
+                # Determine which clients are due for a push.
+                due_clients = [
+                    c for c in all_clients
+                    if now - last_push.get(c.client_id, 0) >= self._effective_interval(c.client_id)
+                ]
+                if due_clients:
                     data = await endpoint.fetch_next()
                     logger.info(
                         "Endpoint %r: fetched %d bytes, pushing to %d client(s)",
-                        endpoint.name, len(data), len(target_clients),
+                        endpoint.name, len(data), len(due_clients),
                     )
                     results = await asyncio.gather(
                         *(
                             _push(self._server, c, data, self.client_dither_algo(c.client_id))
-                            for c in target_clients
+                            for c in due_clients
                         ),
                         return_exceptions=True,
                     )
-                    for client, result in zip(target_clients, results):
+                    push_time = time.monotonic()
+                    for c, result in zip(due_clients, results):
                         if isinstance(result, Exception):
-                            logger.warning("Failed to push to client %s: %s", client.client_id, result)
+                            logger.warning("Failed to push to client %s: %s", c.client_id, result)
+                        else:
+                            last_push[c.client_id] = push_time
+                elif all_clients:
+                    logger.debug("Endpoint %r: no clients due yet, skipping fetch", endpoint.name)
                 else:
                     logger.debug("Endpoint %r: no clients assigned, skipping fetch", endpoint.name)
             except asyncio.CancelledError:
                 raise
             except Exception:
                 logger.exception(
-                    "Endpoint %r: error in feed loop, retrying after %.1fs",
-                    endpoint.name, self._interval,
+                    "Endpoint %r: error in feed loop, retrying in 1s",
+                    endpoint.name,
                 )
-            await asyncio.sleep(self._interval)
+            await asyncio.sleep(1)
+
+    def _effective_interval(self, client_id: str) -> float:
+        """Return the interval to use for a client, falling back to server default."""
+        override = self._client_interval.get(client_id, 0)
+        return override if override > 0 else self._interval
 
 
 async def _push(

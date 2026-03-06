@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { assignClient, setClientDither } from '@/api';
+import { assignClient, setClientDither, setClientInterval } from '@/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
@@ -38,15 +39,27 @@ const ALGO_OPTIONS: { value: DitheringAlgo; label: string }[] = [
 export function ClientCard({ client, endpoints, onChanged }: Props) {
   const [selectedEndpoint, setSelectedEndpoint] = useState(client.endpoint_id ?? '');
   const [selectedAlgo, setSelectedAlgo] = useState<DitheringAlgo>(client.dither_algo);
+  const [intervalInput, setIntervalInput] = useState(
+    client.interval > 0 ? String(client.interval) : '',
+  );
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const ch = client.artwork_channels[0];
 
+  const parsedInterval = intervalInput === '' ? 0 : Number(intervalInput);
+  const intervalValid =
+    intervalInput === '' || (!Number.isNaN(parsedInterval) && parsedInterval >= 0);
+
   const isDirty =
-    selectedEndpoint !== (client.endpoint_id ?? '') || selectedAlgo !== client.dither_algo;
+    selectedEndpoint !== (client.endpoint_id ?? '') ||
+    selectedAlgo !== client.dither_algo ||
+    parsedInterval !== client.interval;
 
   async function handleUpdate() {
+    if (!intervalValid) {
+      return;
+    }
     setBusy(true);
     setErr(null);
     try {
@@ -58,6 +71,10 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
 
       if (selectedAlgo !== client.dither_algo) {
         tasks.push(setClientDither(client.id, selectedAlgo));
+      }
+
+      if (parsedInterval !== client.interval) {
+        tasks.push(setClientInterval(client.id, parsedInterval));
       }
 
       await Promise.all(tasks);
@@ -74,6 +91,8 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
       ? client.endpoint_name
       : `${client.endpoint_name} (default)`
     : '—';
+
+  const intervalLabel = client.interval > 0 ? `${client.interval}s` : 'default';
 
   return (
     <Card>
@@ -100,6 +119,7 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
           </>
         )}
         <Row label="Provider">{providerLabel}</Row>
+        <Row label="Interval">{intervalLabel}</Row>
 
         {/* Provider selector */}
         <Select value={selectedEndpoint} onValueChange={setSelectedEndpoint}>
@@ -130,10 +150,21 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
           </SelectContent>
         </Select>
 
+        {/* Interval input */}
+        <Input
+          type="number"
+          min={0}
+          step={1}
+          placeholder="Interval (s) — blank for default"
+          value={intervalInput}
+          onChange={(e) => setIntervalInput(e.target.value)}
+          className={`h-8 text-xs ${!intervalValid ? 'border-destructive' : ''}`}
+        />
+
         <Button
           size="sm"
           onClick={handleUpdate}
-          disabled={busy || !isDirty}
+          disabled={busy || !isDirty || !intervalValid}
           className="w-full text-xs"
         >
           Update

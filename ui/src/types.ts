@@ -29,6 +29,7 @@ export interface Client {
   endpoint_name: string | null;
   explicit_assignment: boolean;
   dither_algo: DitheringAlgo;
+  interval: number; // seconds; 0 = server default
 }
 
 export interface Endpoint {

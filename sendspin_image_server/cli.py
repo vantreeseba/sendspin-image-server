@@ -258,6 +258,25 @@ async def run(
         registry.set_client_dither(client_id, algo)  # type: ignore[arg-type]
         return web.Response(status=204)
 
+    async def api_set_client_interval(request: web.Request) -> web.Response:
+        """POST /api/clients/{id}/interval  body: {interval}"""
+        client_id = request.match_info["id"]
+        try:
+            body = await request.json()
+        except Exception:
+            return web.Response(status=400, text="Invalid JSON")
+        raw = body.get("interval")
+        if raw is None:
+            return web.Response(status=400, text="'interval' is required")
+        try:
+            interval = float(raw)
+        except (TypeError, ValueError):
+            return web.Response(status=400, text="'interval' must be a number")
+        if interval < 0:
+            return web.Response(status=400, text="'interval' must be >= 0 (0 = server default)")
+        registry.set_client_interval(client_id, interval)
+        return web.Response(status=204)
+
     # ------------------------------------------------------------------
     # Web UI — served from the Vite dist/ directory
     # ------------------------------------------------------------------
@@ -289,6 +308,7 @@ async def run(
     app.router.add_delete("/api/endpoints/{id}", api_delete_endpoint)
     app.router.add_post("/api/clients/{id}/endpoint", api_assign_client)
     app.router.add_post("/api/clients/{id}/dither", api_set_client_dither)
+    app.router.add_post("/api/clients/{id}/interval", api_set_client_interval)
 
     runner = web.AppRunner(app)
     await runner.setup()

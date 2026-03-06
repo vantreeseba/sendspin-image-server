@@ -14,6 +14,8 @@ endpoints
 assignments
     client_id   TEXT PRIMARY KEY
     endpoint_id TEXT NOT NULL
+    dither_algo TEXT NOT NULL DEFAULT 'floyd-steinberg'
+    interval    REAL NOT NULL DEFAULT 0  -- 0 means use server default
 """
 
 from __future__ import annotations
@@ -38,7 +40,8 @@ CREATE TABLE IF NOT EXISTS endpoints (
 CREATE TABLE IF NOT EXISTS assignments (
     client_id   TEXT PRIMARY KEY,
     endpoint_id TEXT NOT NULL,
-    dither_algo TEXT NOT NULL DEFAULT 'floyd-steinberg'
+    dither_algo TEXT NOT NULL DEFAULT 'floyd-steinberg',
+    interval    REAL NOT NULL DEFAULT 0
 );
 """
 
@@ -46,6 +49,8 @@ CREATE TABLE IF NOT EXISTS assignments (
 _MIGRATIONS = [
     # v1: add dither_algo column if it doesn't exist yet
     "ALTER TABLE assignments ADD COLUMN dither_algo TEXT NOT NULL DEFAULT 'floyd-steinberg'",
+    # v2: add interval column (0 = use server default)
+    "ALTER TABLE assignments ADD COLUMN interval REAL NOT NULL DEFAULT 0",
 ]
 
 
@@ -124,17 +129,24 @@ class Database:
     # Assignments
     # ------------------------------------------------------------------
 
-    async def save_assignment(self, client_id: str, endpoint_id: str, dither_algo: str = "floyd-steinberg") -> None:
+    async def save_assignment(
+        self,
+        client_id: str,
+        endpoint_id: str,
+        dither_algo: str = "floyd-steinberg",
+        interval: float = 0,
+    ) -> None:
         assert self._db is not None
         await self._db.execute(
             """
-            INSERT INTO assignments (client_id, endpoint_id, dither_algo)
-            VALUES (?, ?, ?)
+            INSERT INTO assignments (client_id, endpoint_id, dither_algo, interval)
+            VALUES (?, ?, ?, ?)
             ON CONFLICT(client_id) DO UPDATE SET
                 endpoint_id=excluded.endpoint_id,
-                dither_algo=excluded.dither_algo
+                dither_algo=excluded.dither_algo,
+                interval=excluded.interval
             """,
-            (client_id, endpoint_id, dither_algo),
+            (client_id, endpoint_id, dither_algo, interval),
         )
         await self._db.commit()
 
@@ -143,15 +155,18 @@ class Database:
         await self._db.execute("DELETE FROM assignments WHERE client_id = ?", (client_id,))
         await self._db.commit()
 
-    async def load_assignments(self) -> dict[str, dict[str, str]]:
-        """Return {client_id: {endpoint_id, dither_algo}} for all persisted assignments."""
+    async def load_assignments(self) -> dict[str, dict[str, Any]]:
+        """Return {client_id: {endpoint_id, dither_algo, interval}} for all persisted assignments."""
         assert self._db is not None
-        async with self._db.execute("SELECT client_id, endpoint_id, dither_algo FROM assignments") as cur:
+        async with self._db.execute(
+            "SELECT client_id, endpoint_id, dither_algo, interval FROM assignments"
+        ) as cur:
             rows = await cur.fetchall()
         return {
             row["client_id"]: {
                 "endpoint_id": row["endpoint_id"],
                 "dither_algo": row["dither_algo"],
+                "interval": float(row["interval"]),
             }
             for row in rows
         }

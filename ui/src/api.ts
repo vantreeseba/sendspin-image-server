@@ -29,6 +29,17 @@ export async function assignClient(clientId: string, endpointId: string): Promis
   }
 }
 
+export async function setClientInterval(clientId: string, interval: number): Promise<void> {
+  const r = await fetch(`${BASE}/api/clients/${encodeURIComponent(clientId)}/interval`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ interval }),
+  });
+  if (!r.ok) {
+    throw new Error(await r.text());
+  }
+}
+
 export async function setClientDither(clientId: string, algo: DitheringAlgo): Promise<void> {
   const r = await fetch(`${BASE}/api/clients/${encodeURIComponent(clientId)}/dither`, {
     method: 'POST',
