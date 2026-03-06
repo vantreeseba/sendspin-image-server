@@ -4,63 +4,29 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import pathlib
 import signal
 import uuid
 
+from sendspin_image_server.db import Database
+from sendspin_image_server.dither import DITHER_ALGOS, DitheringAlgo, E6_PALETTE_SET, dither_to_pil
+from sendspin_image_server.endpoints import HomeAssistantEndpoint, ImmichEndpoint, LocalFolderEndpoint
 from sendspin_image_server.mdns import MDNSAdvertiser, MDNSDiscovery
+from sendspin_image_server.registry import EndpointRegistry
 from sendspin_image_server.server import SendspinImageServer
+from sendspin_image_server.stream import _resize_for_channel
 
 logger = logging.getLogger(__name__)
 
-# Image file extensions accepted for slideshow mode
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
-
 # TODO: remove FORCE_E6_FOR_TESTING once testing is complete.
-# Dithering is normally applied per-client based on the format negotiated
-# during the Sendspin handshake (clients that request 'e6-dithered' receive
-# Floyd-Steinberg dithered output; others receive the raw image).
 FORCE_E6_FOR_TESTING = True
 
-
-def _collect_images(image_dir: pathlib.Path) -> list[pathlib.Path]:
-    """Return sorted list of image files in *image_dir*."""
-    files = sorted(
-        p for p in image_dir.iterdir()
-        if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS
-    )
-    return files
-
-
-async def _slideshow_loop(
-    server: SendspinImageServer,
-    image_dir: pathlib.Path,
-    interval: float,
-) -> None:
-    """Cycle through images in *image_dir*, broadcasting one every *interval* seconds."""
-    images = _collect_images(image_dir)
-    if not images:
-        logger.warning("No images found in %s — slideshow disabled", image_dir)
-        return
-
-    logger.info(
-        "Slideshow: %d image(s) in %s, interval %.1fs", len(images), image_dir, interval
-    )
-
-    index = 0
-    while True:
-        path = images[index]
-        try:
-            data = path.read_bytes()
-            logger.info("Slideshow: broadcasting %s (%d bytes)", path.name, len(data))
-            await server.broadcast_image(data, channel=0, force_e6_dither=FORCE_E6_FOR_TESTING)
-        except Exception:
-            logger.exception("Slideshow: failed to send %s", path)
-
-        index = (index + 1) % len(images)
-        await asyncio.sleep(interval)
+# Built-in local folder endpoint — always present, cannot be deleted via REST.
+_BUILTIN_LOCAL_ENDPOINT_ID = "builtin-local"
+_BUILTIN_LOCAL_PATH = pathlib.Path("/app/images")
 
 
 async def run(
@@ -69,10 +35,14 @@ async def run(
     name: str,
     server_id: str,
     http_port: int,
-    image_dir: pathlib.Path,
     interval: float,
+    dither_algo: DitheringAlgo,
+    immich_url: str | None = None,
+    immich_album_id: str | None = None,
+    immich_api_key: str | None = None,
+    data_dir: pathlib.Path | None = None,
 ) -> int:
-    """Run the Sendspin image server and HTTP image-push endpoint."""
+    """Run the Sendspin image server and HTTP / REST endpoints."""
     from aiohttp import web
 
     server = SendspinImageServer(server_id=server_id, server_name=name)
@@ -87,36 +57,254 @@ async def run(
     )
     await discovery.start()
 
-    # HTTP endpoint for pushing images manually
-    # Query params:
-    #   channel=<int>   artwork channel (default 0)
+    # ------------------------------------------------------------------
+    # Database
+    # ------------------------------------------------------------------
+    db: Database | None = None
+    if data_dir is not None:
+        db = Database(data_dir / "sendspin.db")
+        await db.open()
+        logger.info("Persistence enabled: %s", data_dir / "sendspin.db")
+    else:
+        logger.info("No DATA_DIR set — running without persistence")
+
+    # ------------------------------------------------------------------
+    # Endpoint registry
+    # ------------------------------------------------------------------
+    registry = EndpointRegistry(server=server, interval=interval, dither_algo=dither_algo, db=db)
+
+    # Built-in local folder endpoint (always first / default, never persisted)
+    builtin = LocalFolderEndpoint(
+        name="Local Images",
+        path=_BUILTIN_LOCAL_PATH,
+        endpoint_id=_BUILTIN_LOCAL_ENDPOINT_ID,
+    )
+    registry.add_endpoint(builtin, make_default=True, _persist=False)
+
+    # Restore previously saved endpoints + assignments from DB
+    await registry.restore_from_db(builtin_endpoint_id=_BUILTIN_LOCAL_ENDPOINT_ID)
+
+    # Optional Immich endpoint from env / CLI (only if not already in DB)
+    if immich_url and immich_album_id and immich_api_key:
+        existing_ids = {ep.endpoint_id for ep in registry.list_endpoints()}
+        # Avoid duplicating if it was already restored from DB with the same URL
+        already = any(
+            getattr(ep, "base_url", None) == immich_url.rstrip("/")
+            and getattr(ep, "album_id", None) == immich_album_id
+            for ep in registry.list_endpoints()
+        )
+        if not already:
+            immich_ep = ImmichEndpoint(
+                name="Immich",
+                base_url=immich_url,
+                album_id=immich_album_id,
+                api_key=immich_api_key,
+            )
+            registry.add_endpoint(immich_ep)
+            logger.info("Immich endpoint registered: %s album %s", immich_url, immich_album_id)
+        else:
+            logger.info("Immich endpoint already loaded from DB, skipping env registration")
+
+    # ------------------------------------------------------------------
+    # HTTP handlers
+    # ------------------------------------------------------------------
+
     async def handle_image_post(request: web.Request) -> web.Response:
+        """POST /image — push raw image bytes to all connected clients."""
         data = await request.read()
         if not data:
             return web.Response(status=400, text="Empty body")
         channel = int(request.query.get("channel", "0"))
         if FORCE_E6_FOR_TESTING:
-            logger.info("e6 dithering forced (test mode) — will apply post-resize per client")
-        await server.broadcast_image(data, channel=channel, force_e6_dither=FORCE_E6_FOR_TESTING)
+            logger.info("e6 dithering forced (test mode, algo=%s)", dither_algo)
+        await server.broadcast_image(
+            data, channel=channel, force_e6_dither=FORCE_E6_FOR_TESTING, dither_algo=dither_algo
+        )
         logger.info("Pushed image (%d bytes) to artwork clients on channel %d", len(data), channel)
         return web.Response(status=200, text="OK")
 
-    app = web.Application(client_max_size=20 * 1024 * 1024)  # 20MB
+    async def handle_debug_current_image(request: web.Request) -> web.Response:
+        """GET /debug/current-image — return last-broadcast image as PNG."""
+        raw = server.last_image
+        if raw is None:
+            return web.Response(status=404, text="No image available yet")
+
+        loop = asyncio.get_event_loop()
+
+        width, height = 480, 800
+        for client in server.clients.values():
+            if client.has_artwork and client.artwork_channels:
+                ch = client.artwork_channels[0]
+                if ch.media_width and ch.media_height:
+                    width, height = ch.media_width, ch.media_height
+                    break
+
+        resized = await loop.run_in_executor(None, _resize_for_channel, raw, width, height)
+
+        def _dither_verify_encode(data: bytes) -> tuple[bytes, int, int]:
+            import io as _io
+            pil_img = dither_to_pil(data, algo=dither_algo)
+            bad = sum(1 for px in pil_img.getdata() if px not in E6_PALETTE_SET)
+            png_buf = _io.BytesIO()
+            pil_img.save(png_buf, format="PNG")
+            return png_buf.getvalue(), bad, len(list(pil_img.getdata()))
+
+        if FORCE_E6_FOR_TESTING:
+            png_bytes, bad_count, total = await loop.run_in_executor(
+                None, _dither_verify_encode, resized
+            )
+            if bad_count:
+                logger.warning(
+                    "Debug image palette check FAILED — %d/%d off-palette pixel(s)",
+                    bad_count, total,
+                )
+            else:
+                logger.info("Debug image palette check passed — all %d pixels on palette", total)
+        else:
+            import io as _io
+            from PIL import Image as _PILImage
+            pil_img = _PILImage.open(_io.BytesIO(resized)).convert("RGB")
+            png_buf = _io.BytesIO()
+            pil_img.save(png_buf, format="PNG")
+            png_bytes = png_buf.getvalue()
+
+        out_path = pathlib.Path("/tmp/debug_current.png")
+        out_path.write_bytes(png_bytes)
+        logger.info("Debug image saved to %s (%d bytes, %dx%d)", out_path, len(png_bytes), width, height)
+        return web.Response(body=png_bytes, content_type="image/png")
+
+    # ------------------------------------------------------------------
+    # REST API
+    # ------------------------------------------------------------------
+
+    async def api_get_clients(request: web.Request) -> web.Response:
+        """GET /api/clients"""
+        return web.Response(
+            content_type="application/json",
+            text=json.dumps(registry.client_info()),
+        )
+
+    async def api_get_endpoints(request: web.Request) -> web.Response:
+        """GET /api/endpoints"""
+        data = []
+        for ep in registry.list_endpoints():
+            d = ep.to_dict()
+            d["builtin"] = ep.endpoint_id == _BUILTIN_LOCAL_ENDPOINT_ID
+            d["is_default"] = ep.endpoint_id == registry.default_endpoint_id
+            data.append(d)
+        return web.Response(content_type="application/json", text=json.dumps(data))
+
+    async def api_add_endpoint(request: web.Request) -> web.Response:
+        """POST /api/endpoints  body: {kind, name, ...}"""
+        try:
+            body = await request.json()
+        except Exception:
+            return web.Response(status=400, text="Invalid JSON")
+
+        kind = body.get("kind")
+        ep_name = body.get("name", "").strip()
+        if not ep_name:
+            return web.Response(status=400, text="'name' is required")
+
+        if kind == "local":
+            path_str = body.get("path", "").strip()
+            if not path_str:
+                return web.Response(status=400, text="'path' is required for kind=local")
+            path = pathlib.Path(path_str)
+            if not path.is_dir():
+                return web.Response(status=400, text=f"Directory not found: {path_str}")
+            ep = LocalFolderEndpoint(name=ep_name, path=path)
+        elif kind == "immich":
+            base_url = body.get("base_url", "").strip()
+            album_id = body.get("album_id", "").strip()
+            api_key = body.get("api_key", "").strip()
+            if not (base_url and album_id and api_key):
+                return web.Response(status=400, text="'base_url', 'album_id', 'api_key' are required for kind=immich")
+            ep = ImmichEndpoint(name=ep_name, base_url=base_url, album_id=album_id, api_key=api_key)
+        elif kind == "homeassistant":
+            base_url = body.get("base_url", "").strip()
+            token = body.get("token", "").strip()
+            media_content_id = body.get("media_content_id", "media-source://media_source").strip()
+            if not (base_url and token):
+                return web.Response(status=400, text="'base_url' and 'token' are required for kind=homeassistant")
+            ep = HomeAssistantEndpoint(
+                name=ep_name,
+                base_url=base_url,
+                token=token,
+                media_content_id=media_content_id,
+            )
+        else:
+            return web.Response(status=400, text=f"Unknown kind: {kind!r}. Must be 'local', 'immich', or 'homeassistant'")
+
+        registry.add_endpoint(ep)
+        d = ep.to_dict()
+        d["builtin"] = False
+        d["is_default"] = ep.endpoint_id == registry.default_endpoint_id
+        return web.Response(status=201, content_type="application/json", text=json.dumps(d))
+
+    async def api_delete_endpoint(request: web.Request) -> web.Response:
+        """DELETE /api/endpoints/{id}"""
+        endpoint_id = request.match_info["id"]
+        if endpoint_id == _BUILTIN_LOCAL_ENDPOINT_ID:
+            return web.Response(status=403, text="Cannot delete built-in endpoint")
+        removed = registry.remove_endpoint(endpoint_id)
+        if not removed:
+            return web.Response(status=404, text=f"Endpoint {endpoint_id!r} not found")
+        return web.Response(status=204)
+
+    async def api_assign_client(request: web.Request) -> web.Response:
+        """POST /api/clients/{id}/endpoint  body: {endpoint_id}"""
+        client_id = request.match_info["id"]
+        try:
+            body = await request.json()
+        except Exception:
+            return web.Response(status=400, text="Invalid JSON")
+        endpoint_id = body.get("endpoint_id", "").strip()
+        if not endpoint_id:
+            return web.Response(status=400, text="'endpoint_id' is required")
+        ok = registry.assign(client_id, endpoint_id)
+        if not ok:
+            return web.Response(status=404, text=f"Endpoint {endpoint_id!r} not found")
+        return web.Response(status=204)
+
+    # ------------------------------------------------------------------
+    # Web UI — served from the Vite dist/ directory
+    # ------------------------------------------------------------------
+    _UI_DIST = pathlib.Path(__file__).parent / "ui_dist"
+    _UI_INDEX = _UI_DIST / "index.html"
+
+    async def handle_ui(request: web.Request) -> web.Response:
+        """GET / — serve the React SPA index.html."""
+        if not _UI_INDEX.exists():
+            return web.Response(status=503, text="UI not built — ui_dist/index.html missing")
+        return web.Response(
+            content_type="text/html",
+            text=_UI_INDEX.read_text(encoding="utf-8"),
+        )
+
+    # ------------------------------------------------------------------
+    # App wiring
+    # ------------------------------------------------------------------
+    app = web.Application(client_max_size=20 * 1024 * 1024)
+    app.router.add_get("/", handle_ui)
+    # Serve Vite assets (JS/CSS chunks) from ui_dist/assets/
+    if _UI_DIST.exists():
+        app.router.add_static("/assets", _UI_DIST / "assets", name="ui_assets")
     app.router.add_post("/image", handle_image_post)
+    app.router.add_get("/debug/current-image", handle_debug_current_image)
+    app.router.add_get("/api/clients", api_get_clients)
+    app.router.add_get("/api/endpoints", api_get_endpoints)
+    app.router.add_post("/api/endpoints", api_add_endpoint)
+    app.router.add_delete("/api/endpoints/{id}", api_delete_endpoint)
+    app.router.add_post("/api/clients/{id}/endpoint", api_assign_client)
 
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, host, http_port)
     await site.start()
 
-    logger.info("HTTP image-push endpoint at http://%s:%d/image", host, http_port)
-
-    # Start slideshow background task
-    slideshow_task: asyncio.Task[None] = asyncio.create_task(
-        _slideshow_loop(server, image_dir, interval),
-        name="slideshow",
-    )
-
+    logger.info("HTTP endpoint: http://%s:%d/", host, http_port)
+    logger.info("Dithering algorithm: %s", dither_algo)
     logger.info("Server running. Press Ctrl+C to quit.")
 
     loop = asyncio.get_event_loop()
@@ -136,17 +324,19 @@ async def run(
         await stop_event.wait()
     else:
         try:
-            await asyncio.Event().wait()  # wait forever
+            await asyncio.Event().wait()
         except (KeyboardInterrupt, asyncio.CancelledError):
             pass
 
     logger.info("Shutting down...")
-    slideshow_task.cancel()
-    await asyncio.gather(slideshow_task, return_exceptions=True)
+    registry.stop_all()
+    await registry.wait_stopped()
     await discovery.stop()
     await mdns.stop()
     await server.stop()
     await runner.cleanup()
+    if db is not None:
+        await db.close()
     return 0
 
 
@@ -155,41 +345,42 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Sendspin image server — silent audio stream with artwork push"
     )
-    parser.add_argument("--host", default="0.0.0.0", help="Bind address (default: 0.0.0.0)")
-    parser.add_argument("--port", type=int, default=8927, help="WebSocket port (default: 8927)")
-    parser.add_argument(
-        "--http-port", type=int, default=8928, help="HTTP image-push port (default: 8928)"
-    )
-    parser.add_argument("--name", default="Sendspin Image Server", help="Server friendly name")
+    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--port", type=int, default=8927)
+    parser.add_argument("--http-port", type=int, default=8928)
+    parser.add_argument("--name", default="Sendspin Image Server")
     parser.add_argument(
         "--server-id",
         default=f"sendspin-image-{uuid.uuid4().hex[:8]}",
-        help="Unique server identifier",
     )
     parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
-        help="Logging level (default: INFO)",
-    )
-    parser.add_argument(
-        "--image-dir",
-        type=pathlib.Path,
-        default=pathlib.Path(os.environ.get("IMAGE_DIR", "./images")),
-        metavar="DIR",
-        help="Directory of images to cycle through as a slideshow (env: IMAGE_DIR, default: ./images)",
     )
     parser.add_argument(
         "--interval",
         type=float,
         default=float(os.environ.get("SLIDESHOW_INTERVAL", "60")),
         metavar="SECONDS",
-        help="Seconds between slideshow images (env: SLIDESHOW_INTERVAL, default: 60)",
+    )
+    parser.add_argument(
+        "--dither-algo",
+        default=os.environ.get("DITHER_ALGO", "floyd-steinberg"),
+        choices=list(DITHER_ALGOS),
+    )
+    parser.add_argument("--immich-url", default=os.environ.get("IMMICH_URL"), metavar="URL")
+    parser.add_argument("--immich-album-id", default=os.environ.get("IMMICH_ALBUM_ID"), metavar="UUID")
+    parser.add_argument("--immich-api-key", default=os.environ.get("IMMICH_API_KEY"), metavar="KEY")
+    _data_dir_default = os.environ.get("DATA_DIR")
+    parser.add_argument(
+        "--data-dir",
+        type=pathlib.Path,
+        default=pathlib.Path(_data_dir_default) if _data_dir_default else None,
+        metavar="DIR",
+        help="Directory for persistent DB (env: DATA_DIR). Omit to run without persistence.",
     )
     args = parser.parse_args()
-
-    if not args.image_dir.is_dir():
-        parser.error(f"--image-dir {args.image_dir!r} is not a directory (set IMAGE_DIR env var or pass --image-dir)")
 
     logging.basicConfig(
         level=getattr(logging, args.log_level),
@@ -204,8 +395,12 @@ def main() -> None:
                 name=args.name,
                 server_id=args.server_id,
                 http_port=args.http_port,
-                image_dir=args.image_dir,
                 interval=args.interval,
+                dither_algo=args.dither_algo,
+                immich_url=args.immich_url,
+                immich_album_id=args.immich_album_id,
+                immich_api_key=args.immich_api_key,
+                data_dir=args.data_dir,
             )
         )
     )
