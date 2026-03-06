@@ -12,9 +12,6 @@ jobs:
     permissions:
       id-token: write
       contents: write
-    outputs:
-      released: ${{ steps.release.outputs.released }}
-      tag: ${{ steps.release.outputs.tag }}
 
     steps:
       - name: Checkout
@@ -35,19 +32,18 @@ jobs:
         id: release
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: |
-          semantic-release version
-          if git describe --exact-match --tags HEAD 2>/dev/null; then
-            echo "released=true" >> "$GITHUB_OUTPUT"
-            echo "tag=$(git describe --exact-match --tags HEAD)" >> "$GITHUB_OUTPUT"
-          else
-            echo "released=false" >> "$GITHUB_OUTPUT"
-          fi
+        run: semantic-release version
 
-  publish:
-    needs: release
-    if: needs.release.outputs.released == 'true'
-    uses: ./.github/workflows/publish.yml
-    with:
-      tag: ${{ needs.release.outputs.tag }}
-    secrets: inherit
+      - name: Trigger publish on new tag
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          TAG=$(git describe --exact-match --tags HEAD 2>/dev/null || true)
+          if [ -n "$TAG" ]; then
+            echo "New release tag: $TAG — triggering publish workflow"
+            gh workflow run publish.yml \
+              --repo ${{ github.repository }} \
+              --ref "$TAG"
+          else
+            echo "No new tag on HEAD — skipping publish"
+          fi
