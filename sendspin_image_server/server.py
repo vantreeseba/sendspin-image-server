@@ -22,6 +22,7 @@ from sendspin_image_server.client import (
     SUPPORTED_ROLES,
     server_time_us,
 )
+from sendspin_image_server.dither import DitheringAlgo
 from sendspin_image_server.stream import (
     PCM_BIT_DEPTH,
     PCM_CHANNELS,
@@ -53,6 +54,16 @@ class SendspinImageServer:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    @property
+    def last_image(self) -> bytes | None:
+        """The most recently broadcast image bytes, or None if none sent yet."""
+        return self._last_image
+
+    @property
+    def clients(self) -> dict[str, ClientState]:
+        """Read-only view of currently connected clients."""
+        return self._clients
 
     async def start(self, host: str = "0.0.0.0", port: int = 8927) -> None:
         """Start the WebSocket server."""
@@ -138,12 +149,13 @@ class SendspinImageServer:
         channel: int = 0,
         *,
         force_e6_dither: bool = False,
+        dither_algo: DitheringAlgo = "floyd-steinberg",
     ) -> None:
         """Push an image to all connected artwork clients.
 
-        *force_e6_dither* is a testing flag: when True, e6 dithering is applied
-        for every client regardless of what format they negotiated.  Dithering
-        always happens after per-client resizing.
+        *force_e6_dither* applies dithering to every client regardless of what
+        format they negotiated. *dither_algo* selects the algorithm used.
+        Dithering always happens after per-client resizing.
         """
         self._last_image = image_bytes
         self._last_image_channel = channel
@@ -153,7 +165,11 @@ class SendspinImageServer:
             return
         results = await asyncio.gather(
             *(
-                push_image_to_client(c, image_bytes, channel, force_e6_dither=force_e6_dither)
+                push_image_to_client(
+                    c, image_bytes, channel,
+                    force_e6_dither=force_e6_dither,
+                    dither_algo=dither_algo,
+                )
                 for c in artwork_clients
             ),
             return_exceptions=True,

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from PIL import Image
 
 from sendspin_image_server.client import ClientState, server_time_us
-from sendspin_image_server.dither import floyd_steinberg_e6
+from sendspin_image_server.dither import DitheringAlgo, encode_pil, floyd_steinberg_e6
 
 if TYPE_CHECKING:
     pass
@@ -120,6 +120,7 @@ async def push_image_to_client(
     channel: int = 0,
     *,
     force_e6_dither: bool = False,
+    dither_algo: DitheringAlgo = "floyd-steinberg",
 ) -> None:
     """Send an artwork binary message to a single client.
 
@@ -127,8 +128,8 @@ async def push_image_to_client(
     the client declared in client/hello (or updated via stream/request-format).
 
     If the client's artwork channel has format 'e6-dithered', or if
-    *force_e6_dither* is True, Floyd-Steinberg dithering to the six-color ACeP
-    palette is applied after resizing (always post-resize, never before).
+    *force_e6_dither* is True, dithering to the six-color ACeP palette is
+    applied after resizing (always post-resize, never before).
     """
     loop = asyncio.get_event_loop()
 
@@ -141,10 +142,32 @@ async def push_image_to_client(
                 None, _resize_for_channel, image_bytes, ch.media_width, ch.media_height
             )
 
+        # Determine output format from the channel's declared format.
+        # 'e6-dithered' is a processing directive, not a container format;
+        # it encodes the result as JPEG.  Unknown values fall back to JPEG.
+        fmt_map = {"jpeg": "JPEG", "png": "PNG", "bmp": "BMP", "e6-dithered": "JPEG"}
+        output_format = fmt_map.get(ch.format.lower(), "JPEG")
+
         # Apply e6 dithering if requested by client or forced by caller
         if ch.wants_e6_dither or force_e6_dither:
-            logger.debug("Applying e6 dithering for client %s channel %d", client.client_id, channel)
-            image_bytes = await loop.run_in_executor(None, floyd_steinberg_e6, image_bytes)
+            logger.debug(
+                "Applying e6 dithering (%s) for client %s channel %d → %s",
+                dither_algo, client.client_id, channel, output_format,
+            )
+            image_bytes = await loop.run_in_executor(
+                None, floyd_steinberg_e6, image_bytes, dither_algo, output_format
+            )
+        else:
+            # Re-encode to the client's requested format even without dithering
+            def _reencode(data: bytes, fmt: str) -> bytes:
+                from PIL import Image as _Image
+                import io as _io
+                img = _Image.open(_io.BytesIO(data)).convert("RGB")
+                return encode_pil(img, fmt)
+
+            image_bytes = await loop.run_in_executor(
+                None, _reencode, image_bytes, output_format
+            )
 
     ts = server_time_us()
     msg = build_artwork_message(channel, ts, image_bytes)
