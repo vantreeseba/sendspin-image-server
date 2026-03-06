@@ -1,0 +1,91 @@
+[build-system]
+build-backend = "setuptools.build_meta"
+requires = ["setuptools>=62.3"]
+
+[project]
+name = "sendspin-image-server"
+version = "0.1.0"
+description = "Sendspin server that serves a silent audio stream and distributes image updates to artwork clients"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+
+dependencies = [
+  "websockets>=12.0",
+  "zeroconf>=0.131.0",
+  "aiohttp>=3.9.0",
+  "Pillow>=10.0.0",
+]
+
+[project.scripts]
+sendspin-image-server = "sendspin_image_server.cli:main"
+
+[project.optional-dependencies]
+dev = [
+  "mypy==1.18.2",
+  "ruff==0.14.5",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["sendspin_image_server*"]
+
+[tool.ruff]
+fix = true
+show-fixes = true
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+  "ANN002",
+  "ANN003",
+  "ANN401",
+  "D203",
+  "D213",
+  "D417",
+  "EM101",
+  "EM102",
+  "FIX002",
+  "PLR2004",
+  "PGH004",
+  "PD011",
+  "S101",
+  "TC001",
+  "TC003",
+  "TD002",
+  "TD003",
+  "TD004",
+  "TRY003",
+  "TRY400",
+  "COM812",
+  "S104",
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "pep257"
+
+[tool.ruff.format]
+line-ending = "lf"
+
+[tool.mypy]
+python_version = "3.12"
+follow_imports = "normal"
+ignore_missing_imports = true
+check_untyped_defs = true
+disallow_any_generics = true
+disallow_incomplete_defs = true
+disallow_untyped_calls = true
+disallow_untyped_decorators = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+show_error_codes = true
+strict_equality = true
+strict_optional = true
+warn_no_return = true
+warn_redundant_casts = true
+warn_return_any = true
+warn_unreachable = true
+warn_unused_configs = true
+warn_unused_ignores = true
+packages = ["sendspin_image_server"]
