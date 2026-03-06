@@ -299,6 +299,7 @@ class SendspinImageServer:
         client_id: str = payload.get("client_id", str(uuid.uuid4()))
         name: str = payload.get("name", "Unknown Client")
         supported: list[str] = payload.get("supported_roles", [])
+        logger.info("Client %s supported_roles=%s", client_id, supported)
 
         # Activate the first supported version of each role family we implement
         active_roles: list[str] = []
