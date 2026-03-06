@@ -127,6 +127,24 @@ The React SPA is served from `http://<host>:8928/`.
 - **Image Providers panel** — lists all providers. Add new ones (Immich, Home Assistant, or local folder) via the **Add Provider** button. The built-in local provider cannot be deleted.
 - **Theme** — defaults to dark mode; toggle with the Sun/Moon button in the top-right corner. Preference is stored in `localStorage`.
 
+### Screenshots
+
+**Connected clients — dark mode**
+
+![Connected clients, dark mode](docs/screenshots/ui-dark.png)
+
+**Connected clients — light mode**
+
+![Connected clients, light mode](docs/screenshots/ui-light.png)
+
+**Image Providers panel**
+
+![Image Providers panel](docs/screenshots/ui-providers.png)
+
+**Add image provider dialog**
+
+![Add image provider dialog](docs/screenshots/ui-add-provider.png)
+
 ---
 
 ## REST API
