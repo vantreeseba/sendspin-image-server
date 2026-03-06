@@ -241,8 +241,6 @@ services:
       - /path/to/your/photos:/app/images
     environment:
       DATA_DIR: /data
-      SLIDESHOW_INTERVAL: "120"   # server-wide default; override per client in UI
-      DITHER_ALGO: floyd-steinberg  # server-wide default; override per client in UI
 
 volumes:
   sendspin-data:
@@ -253,7 +251,6 @@ With an Immich provider (added via UI after first start, or pre-configured):
 ```yaml
     environment:
       DATA_DIR: /data
-      SLIDESHOW_INTERVAL: "120"
 ```
 
 > Immich credentials are stored in the database after you add the provider through the UI — no environment variables needed.
@@ -262,16 +259,16 @@ With an Immich provider (added via UI after first start, or pre-configured):
 
 ## Configuration reference
 
-| Environment variable | CLI flag        | Default           | Description                                                                 |
-|----------------------|-----------------|-------------------|-----------------------------------------------------------------------------|
-| `SLIDESHOW_INTERVAL` | `--interval`    | `120`             | Seconds between image advances (server-wide default; overridable per client)|
-| `DITHER_ALGO`        | `--dither-algo` | `floyd-steinberg` | Default dither algorithm; overridable per client in the UI                  |
-| `DATA_DIR`           | `--data-dir`    | *(none)*          | Path for SQLite persistence. Omit to run stateless.                         |
-| —                    | `--host`        | `0.0.0.0`         | Bind address for both servers                                               |
-| —                    | `--port`        | `8927`            | WebSocket (Sendspin protocol) port                                          |
-| —                    | `--http-port`   | `8928`            | HTTP / REST API / Web UI port                                               |
-| —                    | `--name`        | `Sendspin Image Server` | Server display name (shown in mDNS and client handshake)              |
-| —                    | `--log-level`   | `INFO`            | One of `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`                      |
+| Environment variable | CLI flag        | Default                 | Description                                                                 |
+|----------------------|-----------------|-------------------------|-----------------------------------------------------------------------------|
+| `DATA_DIR`           | `--data-dir`    | *(none)*                | Path for SQLite persistence. Omit to run stateless.                         |
+| `WS_PORT`            | `--port`        | `8927`                  | WebSocket (Sendspin protocol) port                                          |
+| `HTTP_PORT`          | `--http-port`   | `8928`                  | HTTP / REST API / Web UI port                                               |
+| —                    | `--host`        | `0.0.0.0`               | Bind address for both servers                                               |
+| —                    | `--interval`    | `120`                   | Seconds between image advances (server-wide default; overridable per client)|
+| —                    | `--dither-algo` | `none`                  | Default dither algorithm; overridable per client in the UI                  |
+| —                    | `--name`        | `Sendspin Image Server` | Server display name (shown in mDNS and client handshake)                    |
+| —                    | `--log-level`   | `INFO`                  | One of `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`                      |
 
 ---
 
