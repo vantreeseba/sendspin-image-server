@@ -14,7 +14,7 @@ endpoints
 assignments
     client_id   TEXT PRIMARY KEY
     endpoint_id TEXT NOT NULL
-    dither_algo TEXT NOT NULL DEFAULT 'floyd-steinberg'
+    dither_algo TEXT NOT NULL DEFAULT 'none'
     interval    REAL NOT NULL DEFAULT 0  -- 0 means use server default
 """
 
@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS endpoints (
 CREATE TABLE IF NOT EXISTS assignments (
     client_id   TEXT PRIMARY KEY,
     endpoint_id TEXT NOT NULL,
-    dither_algo TEXT NOT NULL DEFAULT 'floyd-steinberg',
+    dither_algo TEXT NOT NULL DEFAULT 'none',
     interval    REAL NOT NULL DEFAULT 0
 );
 """
@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS assignments (
 # Migrations applied after schema creation (idempotent ALTER TABLE statements)
 _MIGRATIONS = [
     # v1: add dither_algo column if it doesn't exist yet
-    "ALTER TABLE assignments ADD COLUMN dither_algo TEXT NOT NULL DEFAULT 'floyd-steinberg'",
+    "ALTER TABLE assignments ADD COLUMN dither_algo TEXT NOT NULL DEFAULT 'none'",
     # v2: add interval column (0 = use server default)
     "ALTER TABLE assignments ADD COLUMN interval REAL NOT NULL DEFAULT 0",
 ]
@@ -133,7 +133,7 @@ class Database:
         self,
         client_id: str,
         endpoint_id: str,
-        dither_algo: str = "floyd-steinberg",
+        dither_algo: str = "none",
         interval: float = 0,
     ) -> None:
         assert self._db is not None

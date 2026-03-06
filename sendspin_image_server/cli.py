@@ -358,8 +358,18 @@ def main() -> None:
         description="Sendspin image server — silent audio stream with artwork push"
     )
     parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--port", type=int, default=8927)
-    parser.add_argument("--http-port", type=int, default=8928)
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.environ.get("WS_PORT", "8927")),
+        help="WebSocket port (env: WS_PORT)",
+    )
+    parser.add_argument(
+        "--http-port",
+        type=int,
+        default=int(os.environ.get("HTTP_PORT", "8928")),
+        help="HTTP / UI port (env: HTTP_PORT)",
+    )
     parser.add_argument("--name", default="Sendspin Image Server")
     parser.add_argument(
         "--server-id",
@@ -373,14 +383,14 @@ def main() -> None:
     parser.add_argument(
         "--interval",
         type=float,
-        default=float(os.environ.get("SLIDESHOW_INTERVAL", "120")),
+        default=120,
         metavar="SECONDS",
     )
     parser.add_argument(
         "--dither-algo",
-        default=os.environ.get("DITHER_ALGO", "floyd-steinberg"),
+        default="none",
         choices=list(DITHER_ALGOS),
-        help="Default dithering algorithm for clients without an explicit override (env: DITHER_ALGO)",
+        help="Default dithering algorithm for clients without an explicit override",
     )
     _data_dir_default = os.environ.get("DATA_DIR")
     parser.add_argument(

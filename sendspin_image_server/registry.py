@@ -369,5 +369,5 @@ async def _push(
     await push_image_to_client(
         client, data, 0,
         force_e6_dither=force_dither,
-        dither_algo=dither_algo if force_dither else "floyd-steinberg",
+        dither_algo=dither_algo if force_dither else "none",
     )
