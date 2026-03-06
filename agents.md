@@ -39,6 +39,22 @@ style(cards): restore default padding and increase title font size
 refactor(dither): extract dither algorithms into named functions
 ```
 
+## TypeScript / UI Code Style
+
+- **No single-line `if` statements.** Always use a block body with braces, even for single-statement branches.
+
+```tsx
+// ✗ bad
+if (condition) doSomething();
+
+// ✓ good
+if (condition) {
+  doSomething();
+}
+```
+
+- This applies to `if`, `else`, `for`, `while`, and any other control-flow statement.
+
 ## Scope Guidelines
 
 | Scope         | Covers                                          |

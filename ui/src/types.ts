@@ -5,6 +5,20 @@ export interface ArtworkChannel {
   height: number | null;
 }
 
+export type DitheringAlgo =
+  | 'none'
+  | 'floyd-steinberg'
+  | 'floyd-steinberg-serpentine'
+  | 'atkinson'
+  | 'ordered';
+
+export const DITHERING_ALGOS: DitheringAlgo[] = [
+  'floyd-steinberg',
+  'floyd-steinberg-serpentine',
+  'atkinson',
+  'ordered',
+];
+
 export interface Client {
   id: string;
   name: string;
@@ -14,6 +28,7 @@ export interface Client {
   endpoint_id: string | null;
   endpoint_name: string | null;
   explicit_assignment: boolean;
+  dither_algo: DitheringAlgo;
 }
 
 export interface Endpoint {

@@ -43,9 +43,6 @@ EXPOSE 8928
 
 ENV PYTHONUNBUFFERED=1
 ENV SLIDESHOW_INTERVAL=60
-# IMAGE_DIR is intentionally NOT set here so Immich mode works without conflict.
-# Default slideshow path /app/images is used automatically when neither
-# IMAGE_DIR nor IMMICH_* vars are set.
 # DATA_DIR: mount a host directory here for persistent DB storage.
 # e.g. docker run -v /host/data:/data -e DATA_DIR=/data ...
 VOLUME ["/data"]

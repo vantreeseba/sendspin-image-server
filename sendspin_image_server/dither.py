@@ -57,8 +57,8 @@ E6_PALETTE_RGB: Final[list[tuple[int, int, int]]] = [
 
 E6_PALETTE_SET: Final[frozenset[tuple[int, int, int]]] = frozenset(E6_PALETTE_RGB)
 
-DitheringAlgo = Literal["floyd-steinberg", "floyd-steinberg-serpentine", "atkinson", "ordered"]
-DITHER_ALGOS: Final[tuple[str, ...]] = ("floyd-steinberg", "floyd-steinberg-serpentine", "atkinson", "ordered")
+DitheringAlgo = Literal["none", "floyd-steinberg", "floyd-steinberg-serpentine", "atkinson", "ordered"]
+DITHER_ALGOS: Final[tuple[str, ...]] = ("none", "floyd-steinberg", "floyd-steinberg-serpentine", "atkinson", "ordered")
 
 # ---------------------------------------------------------------------------
 # Pillow palette image (used only by floyd-steinberg path)
@@ -354,6 +354,8 @@ def dither_to_pil(image_bytes: bytes, algo: DitheringAlgo = "floyd-steinberg") -
     src.load()
     img = _preprocess(src)
 
+    if algo == "none":
+        return img
     if algo == "floyd-steinberg":
         return _floyd_steinberg(img)
     if algo == "floyd-steinberg-serpentine":

@@ -4,18 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
+from sendspin_image_server.dither import DitheringAlgo
 from sendspin_image_server.endpoints import ImageEndpoint
 
 if TYPE_CHECKING:
     from sendspin_image_server.db import Database
-    from sendspin_image_server.dither import DitheringAlgo
     from sendspin_image_server.server import SendspinImageServer
 
 logger = logging.getLogger(__name__)
 
-_FORCE_E6 = True
+_NO_DITHER_SENTINEL: DitheringAlgo = "none"
 
 
 class EndpointRegistry:
@@ -35,6 +35,7 @@ class EndpointRegistry:
 
         self._endpoints: dict[str, ImageEndpoint] = {}
         self._assignments: dict[str, str | None] = {}
+        self._client_dither: dict[str, DitheringAlgo] = {}  # per-client override
         self._default_endpoint_id: str | None = None
         self._tasks: dict[str, asyncio.Task[None]] = {}
 
@@ -91,10 +92,16 @@ class EndpointRegistry:
                 logger.exception("Failed to restore endpoint id=%s", eid)
 
         assignments = await self._db.load_assignments()
-        for client_id, endpoint_id in assignments.items():
+        for client_id, row in assignments.items():
+            endpoint_id = row["endpoint_id"]
+            dither_algo = row.get("dither_algo", self._dither_algo)
             if endpoint_id in self._endpoints:
                 self._assignments[client_id] = endpoint_id
-                logger.info("Restored assignment: client %s → endpoint %s", client_id, endpoint_id)
+                self._client_dither[client_id] = dither_algo  # type: ignore[assignment]
+                logger.info(
+                    "Restored assignment: client %s → endpoint %s (dither=%s)",
+                    client_id, endpoint_id, dither_algo,
+                )
             else:
                 logger.warning(
                     "Skipping stale assignment: client %s → endpoint %s (endpoint not loaded)",
@@ -175,10 +182,23 @@ class EndpointRegistry:
         if endpoint_id not in self._endpoints:
             return False
         self._assignments[client_id] = endpoint_id
+        algo = self._client_dither.get(client_id, self._dither_algo)
         if self._db is not None:
-            asyncio.ensure_future(self._db.save_assignment(client_id, endpoint_id))
+            asyncio.ensure_future(self._db.save_assignment(client_id, endpoint_id, algo))
         logger.info("Client %s assigned to endpoint %s", client_id, endpoint_id)
         return True
+
+    def set_client_dither(self, client_id: str, algo: DitheringAlgo) -> None:
+        """Set the dithering algorithm for a specific client and persist it."""
+        self._client_dither[client_id] = algo
+        endpoint_id = self._assignments.get(client_id)
+        if self._db is not None and endpoint_id:
+            asyncio.ensure_future(self._db.save_assignment(client_id, endpoint_id, algo))
+        logger.info("Client %s dither algo set to %s", client_id, algo)
+
+    def client_dither_algo(self, client_id: str) -> DitheringAlgo:
+        """Return the effective dither algorithm for a client."""
+        return cast("DitheringAlgo", self._client_dither.get(client_id, self._dither_algo))
 
     def unassign(self, client_id: str) -> None:
         """Remove explicit assignment; client falls back to default."""
@@ -226,6 +246,7 @@ class EndpointRegistry:
                 "endpoint_id": eid,
                 "endpoint_name": ep.name if ep else None,
                 "explicit_assignment": self._assignments.get(client.client_id) is not None,
+                "dither_algo": self.client_dither_algo(client.client_id),
             })
         return result
 
@@ -274,7 +295,10 @@ class EndpointRegistry:
                         endpoint.name, len(data), len(target_clients),
                     )
                     results = await asyncio.gather(
-                        *(_push(self._server, c, data, self._dither_algo) for c in target_clients),
+                        *(
+                            _push(self._server, c, data, self.client_dither_algo(c.client_id))
+                            for c in target_clients
+                        ),
                         return_exceptions=True,
                     )
                     for client, result in zip(target_clients, results):
@@ -299,8 +323,9 @@ async def _push(
     dither_algo: DitheringAlgo,
 ) -> None:
     from sendspin_image_server.stream import push_image_to_client
+    force_dither = dither_algo != _NO_DITHER_SENTINEL
     await push_image_to_client(
         client, data, 0,
-        force_e6_dither=_FORCE_E6,
-        dither_algo=dither_algo,
+        force_e6_dither=force_dither,
+        dither_algo=dither_algo if force_dither else "floyd-steinberg",
     )

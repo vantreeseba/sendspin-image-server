@@ -19,10 +19,9 @@ from sendspin_image_server.registry import EndpointRegistry
 from sendspin_image_server.server import SendspinImageServer
 from sendspin_image_server.stream import _resize_for_channel
 
-logger = logging.getLogger(__name__)
+_VALID_DITHER_ALGOS = set(DITHER_ALGOS)
 
-# TODO: remove FORCE_E6_FOR_TESTING once testing is complete.
-FORCE_E6_FOR_TESTING = True
+logger = logging.getLogger(__name__)
 
 # Built-in local folder endpoint — always present, cannot be deleted via REST.
 _BUILTIN_LOCAL_ENDPOINT_ID = "builtin-local"
@@ -37,9 +36,6 @@ async def run(
     http_port: int,
     interval: float,
     dither_algo: DitheringAlgo,
-    immich_url: str | None = None,
-    immich_album_id: str | None = None,
-    immich_api_key: str | None = None,
     data_dir: pathlib.Path | None = None,
 ) -> int:
     """Run the Sendspin image server and HTTP / REST endpoints."""
@@ -84,27 +80,6 @@ async def run(
     # Restore previously saved endpoints + assignments from DB
     await registry.restore_from_db(builtin_endpoint_id=_BUILTIN_LOCAL_ENDPOINT_ID)
 
-    # Optional Immich endpoint from env / CLI (only if not already in DB)
-    if immich_url and immich_album_id and immich_api_key:
-        existing_ids = {ep.endpoint_id for ep in registry.list_endpoints()}
-        # Avoid duplicating if it was already restored from DB with the same URL
-        already = any(
-            getattr(ep, "base_url", None) == immich_url.rstrip("/")
-            and getattr(ep, "album_id", None) == immich_album_id
-            for ep in registry.list_endpoints()
-        )
-        if not already:
-            immich_ep = ImmichEndpoint(
-                name="Immich",
-                base_url=immich_url,
-                album_id=immich_album_id,
-                api_key=immich_api_key,
-            )
-            registry.add_endpoint(immich_ep)
-            logger.info("Immich endpoint registered: %s album %s", immich_url, immich_album_id)
-        else:
-            logger.info("Immich endpoint already loaded from DB, skipping env registration")
-
     # ------------------------------------------------------------------
     # HTTP handlers
     # ------------------------------------------------------------------
@@ -115,10 +90,10 @@ async def run(
         if not data:
             return web.Response(status=400, text="Empty body")
         channel = int(request.query.get("channel", "0"))
-        if FORCE_E6_FOR_TESTING:
-            logger.info("e6 dithering forced (test mode, algo=%s)", dither_algo)
+        # Per-client dithering is handled by the registry feed loop.
+        # The manual /image push falls back to the server-wide default algo.
         await server.broadcast_image(
-            data, channel=channel, force_e6_dither=FORCE_E6_FOR_TESTING, dither_algo=dither_algo
+            data, channel=channel, force_e6_dither=dither_algo != "none", dither_algo=dither_algo
         )
         logger.info("Pushed image (%d bytes) to artwork clients on channel %d", len(data), channel)
         return web.Response(status=200, text="OK")
@@ -149,7 +124,7 @@ async def run(
             pil_img.save(png_buf, format="PNG")
             return png_buf.getvalue(), bad, len(list(pil_img.getdata()))
 
-        if FORCE_E6_FOR_TESTING:
+        if dither_algo != "none":
             png_bytes, bad_count, total = await loop.run_in_executor(
                 None, _dither_verify_encode, resized
             )
@@ -267,6 +242,22 @@ async def run(
             return web.Response(status=404, text=f"Endpoint {endpoint_id!r} not found")
         return web.Response(status=204)
 
+    async def api_set_client_dither(request: web.Request) -> web.Response:
+        """POST /api/clients/{id}/dither  body: {dither_algo}"""
+        client_id = request.match_info["id"]
+        try:
+            body = await request.json()
+        except Exception:
+            return web.Response(status=400, text="Invalid JSON")
+        algo = body.get("dither_algo", "").strip()
+        if algo not in _VALID_DITHER_ALGOS:
+            return web.Response(
+                status=400,
+                text=f"Invalid dither_algo {algo!r}. Choose from: {', '.join(sorted(_VALID_DITHER_ALGOS))}",
+            )
+        registry.set_client_dither(client_id, algo)  # type: ignore[arg-type]
+        return web.Response(status=204)
+
     # ------------------------------------------------------------------
     # Web UI — served from the Vite dist/ directory
     # ------------------------------------------------------------------
@@ -297,6 +288,7 @@ async def run(
     app.router.add_post("/api/endpoints", api_add_endpoint)
     app.router.add_delete("/api/endpoints/{id}", api_delete_endpoint)
     app.router.add_post("/api/clients/{id}/endpoint", api_assign_client)
+    app.router.add_post("/api/clients/{id}/dither", api_set_client_dither)
 
     runner = web.AppRunner(app)
     await runner.setup()
@@ -368,10 +360,8 @@ def main() -> None:
         "--dither-algo",
         default=os.environ.get("DITHER_ALGO", "floyd-steinberg"),
         choices=list(DITHER_ALGOS),
+        help="Default dithering algorithm for clients without an explicit override (env: DITHER_ALGO)",
     )
-    parser.add_argument("--immich-url", default=os.environ.get("IMMICH_URL"), metavar="URL")
-    parser.add_argument("--immich-album-id", default=os.environ.get("IMMICH_ALBUM_ID"), metavar="UUID")
-    parser.add_argument("--immich-api-key", default=os.environ.get("IMMICH_API_KEY"), metavar="KEY")
     _data_dir_default = os.environ.get("DATA_DIR")
     parser.add_argument(
         "--data-dir",
@@ -397,9 +387,6 @@ def main() -> None:
                 http_port=args.http_port,
                 interval=args.interval,
                 dither_algo=args.dither_algo,
-                immich_url=args.immich_url,
-                immich_album_id=args.immich_album_id,
-                immich_api_key=args.immich_api_key,
                 data_dir=args.data_dir,
             )
         )

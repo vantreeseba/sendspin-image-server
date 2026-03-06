@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { assignClient } from '@/api';
+import { assignClient, setClientDither } from '@/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -10,7 +11,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import type { Client, Endpoint } from '@/types';
+import { Switch } from '@/components/ui/switch';
+import type { Client, DitheringAlgo, Endpoint } from '@/types';
+import { DITHERING_ALGOS } from '@/types';
 
 interface Props {
   client: Client;
@@ -34,10 +37,19 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  const isDithering = client.dither_algo !== 'none';
+  const currentAlgo: DitheringAlgo = isDithering ? client.dither_algo : 'floyd-steinberg';
+
+  const [ditherEnabled, setDitherEnabled] = useState(isDithering);
+  const [ditherAlgo, setDitherAlgo] = useState<DitheringAlgo>(currentAlgo);
+  const [ditherBusy, setDitherBusy] = useState(false);
+
   const ch = client.artwork_channels[0];
 
   async function handleAssign() {
-    if (!selected) return;
+    if (!selected) {
+      return;
+    }
     setBusy(true);
     setErr(null);
     try {
@@ -47,6 +59,34 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleDitherToggle(enabled: boolean) {
+    setDitherEnabled(enabled);
+    const algo: DitheringAlgo = enabled ? ditherAlgo : 'none';
+    setDitherBusy(true);
+    try {
+      await setClientDither(client.id, algo);
+      onChanged();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+      setDitherEnabled(!enabled);
+    } finally {
+      setDitherBusy(false);
+    }
+  }
+
+  async function handleAlgoChange(algo: DitheringAlgo) {
+    setDitherAlgo(algo);
+    setDitherBusy(true);
+    try {
+      await setClientDither(client.id, algo);
+      onChanged();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDitherBusy(false);
     }
   }
 
@@ -82,6 +122,7 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
         )}
         <Row label="Provider">{providerLabel}</Row>
 
+        {/* Provider assignment row */}
         <div className="flex items-stretch gap-1.5 pt-1">
           <Select value={selected} onValueChange={setSelected}>
             <SelectTrigger size="sm" className="flex-1 text-xs">
@@ -104,6 +145,40 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
           >
             Assign
           </Button>
+        </div>
+
+        {/* Dithering controls */}
+        <div className="space-y-1.5 pt-1">
+          <div className="flex items-center gap-2">
+            <Switch
+              id={`dither-${client.id}`}
+              checked={ditherEnabled}
+              onCheckedChange={handleDitherToggle}
+              disabled={ditherBusy}
+            />
+            <Label htmlFor={`dither-${client.id}`} className="cursor-pointer text-xs">
+              Dithering
+            </Label>
+          </div>
+
+          {ditherEnabled && (
+            <Select
+              value={ditherAlgo}
+              onValueChange={(v) => handleAlgoChange(v as DitheringAlgo)}
+              disabled={ditherBusy}
+            >
+              <SelectTrigger size="sm" className="w-full text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {DITHERING_ALGOS.map((algo) => (
+                  <SelectItem key={algo} value={algo} className="text-xs">
+                    {algo}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
         </div>
 
         {err && <p className="text-destructive text-xs">{err}</p>}

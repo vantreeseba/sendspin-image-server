@@ -37,9 +37,16 @@ CREATE TABLE IF NOT EXISTS endpoints (
 
 CREATE TABLE IF NOT EXISTS assignments (
     client_id   TEXT PRIMARY KEY,
-    endpoint_id TEXT NOT NULL
+    endpoint_id TEXT NOT NULL,
+    dither_algo TEXT NOT NULL DEFAULT 'floyd-steinberg'
 );
 """
+
+# Migrations applied after schema creation (idempotent ALTER TABLE statements)
+_MIGRATIONS = [
+    # v1: add dither_algo column if it doesn't exist yet
+    "ALTER TABLE assignments ADD COLUMN dither_algo TEXT NOT NULL DEFAULT 'floyd-steinberg'",
+]
 
 
 class Database:
@@ -55,7 +62,18 @@ class Database:
         self._db.row_factory = aiosqlite.Row
         await self._db.executescript(_SCHEMA)
         await self._db.commit()
+        await self._run_migrations()
         logger.info("Database opened: %s", self._path)
+
+    async def _run_migrations(self) -> None:
+        assert self._db is not None
+        for sql in _MIGRATIONS:
+            try:
+                await self._db.execute(sql)
+                await self._db.commit()
+            except Exception:
+                # Column already exists or other harmless conflict — skip
+                pass
 
     async def close(self) -> None:
         if self._db is not None:
@@ -106,15 +124,17 @@ class Database:
     # Assignments
     # ------------------------------------------------------------------
 
-    async def save_assignment(self, client_id: str, endpoint_id: str) -> None:
+    async def save_assignment(self, client_id: str, endpoint_id: str, dither_algo: str = "floyd-steinberg") -> None:
         assert self._db is not None
         await self._db.execute(
             """
-            INSERT INTO assignments (client_id, endpoint_id)
-            VALUES (?, ?)
-            ON CONFLICT(client_id) DO UPDATE SET endpoint_id=excluded.endpoint_id
+            INSERT INTO assignments (client_id, endpoint_id, dither_algo)
+            VALUES (?, ?, ?)
+            ON CONFLICT(client_id) DO UPDATE SET
+                endpoint_id=excluded.endpoint_id,
+                dither_algo=excluded.dither_algo
             """,
-            (client_id, endpoint_id),
+            (client_id, endpoint_id, dither_algo),
         )
         await self._db.commit()
 
@@ -123,9 +143,15 @@ class Database:
         await self._db.execute("DELETE FROM assignments WHERE client_id = ?", (client_id,))
         await self._db.commit()
 
-    async def load_assignments(self) -> dict[str, str]:
-        """Return {client_id: endpoint_id} for all persisted assignments."""
+    async def load_assignments(self) -> dict[str, dict[str, str]]:
+        """Return {client_id: {endpoint_id, dither_algo}} for all persisted assignments."""
         assert self._db is not None
-        async with self._db.execute("SELECT client_id, endpoint_id FROM assignments") as cur:
+        async with self._db.execute("SELECT client_id, endpoint_id, dither_algo FROM assignments") as cur:
             rows = await cur.fetchall()
-        return {row["client_id"]: row["endpoint_id"] for row in rows}
+        return {
+            row["client_id"]: {
+                "endpoint_id": row["endpoint_id"],
+                "dither_algo": row["dither_algo"],
+            }
+            for row in rows
+        }

@@ -1,16 +1,20 @@
-import type { Client, Endpoint } from './types';
+import type { Client, DitheringAlgo, Endpoint } from './types';
 
 const BASE = '';
 
 export async function getClients(): Promise<Client[]> {
   const r = await fetch(`${BASE}/api/clients`);
-  if (!r.ok) throw new Error(await r.text());
+  if (!r.ok) {
+    throw new Error(await r.text());
+  }
   return r.json() as Promise<Client[]>;
 }
 
 export async function getEndpoints(): Promise<Endpoint[]> {
   const r = await fetch(`${BASE}/api/endpoints`);
-  if (!r.ok) throw new Error(await r.text());
+  if (!r.ok) {
+    throw new Error(await r.text());
+  }
   return r.json() as Promise<Endpoint[]>;
 }
 
@@ -20,12 +24,27 @@ export async function assignClient(clientId: string, endpointId: string): Promis
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ endpoint_id: endpointId }),
   });
-  if (!r.ok) throw new Error(await r.text());
+  if (!r.ok) {
+    throw new Error(await r.text());
+  }
+}
+
+export async function setClientDither(clientId: string, algo: DitheringAlgo): Promise<void> {
+  const r = await fetch(`${BASE}/api/clients/${encodeURIComponent(clientId)}/dither`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dither_algo: algo }),
+  });
+  if (!r.ok) {
+    throw new Error(await r.text());
+  }
 }
 
 export async function deleteEndpoint(id: string): Promise<void> {
   const r = await fetch(`${BASE}/api/endpoints/${encodeURIComponent(id)}`, { method: 'DELETE' });
-  if (!r.ok) throw new Error(await r.text());
+  if (!r.ok) {
+    throw new Error(await r.text());
+  }
 }
 
 export type NewLocalEndpoint = { kind: 'local'; name: string; path: string };
@@ -51,6 +70,8 @@ export async function addEndpoint(body: NewEndpoint): Promise<Endpoint> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!r.ok) throw new Error(await r.text());
+  if (!r.ok) {
+    throw new Error(await r.text());
+  }
   return r.json() as Promise<Endpoint>;
 }
