@@ -29,12 +29,15 @@ def _first_valid_ip(addresses: list[str]) -> str | None:
     return None
 
 
+_MDNS_PORT = 5353
+
+
 class MDNSAdvertiser:
     """Advertises the Sendspin server via mDNS (_sendspin-server._tcp.local.)."""
 
-    def __init__(self, name: str, port: int, path: str = "/sendspin") -> None:
+    def __init__(self, name: str, ws_port: int, path: str = "/sendspin") -> None:
         self._name = name
-        self._port = port
+        self._ws_port = ws_port
         self._path = path
         self._zeroconf: AsyncZeroconf | None = None
         self._info: ServiceInfo | None = None
@@ -54,14 +57,15 @@ class MDNSAdvertiser:
             SERVER_SERVICE_TYPE,
             service_name,
             addresses=[socket.inet_aton(local_ip)],
-            port=self._port,
+            port=self._ws_port,
             properties={"path": self._path},
             server=f"{hostname}.local.",
         )
         self._zeroconf = AsyncZeroconf()
         await self._zeroconf.async_register_service(self._info)
         logger.info(
-            "mDNS: advertising '%s' on %s:%d%s", self._name, local_ip, self._port, self._path
+            "mDNS: advertising '%s' on %s:%d%s (mDNS port: %d)",
+            self._name, local_ip, self._ws_port, self._path, _MDNS_PORT,
         )
 
     async def stop(self) -> None:

@@ -44,7 +44,7 @@ async def run(
     server = SendspinImageServer(server_id=server_id, server_name=name)
     await server.start(host=host, port=port)
 
-    mdns = MDNSAdvertiser(name=name, port=port)
+    mdns = MDNSAdvertiser(name=name, ws_port=port)
     await mdns.start()
 
     discovery = MDNSDiscovery(
