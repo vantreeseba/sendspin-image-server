@@ -23,6 +23,7 @@ All commits must follow the **Angular/Semantic commit convention**:
 
 ### Rules
 
+- **Never rebase.** Use `git pull --no-rebase` (merge) when integrating remote changes. Do not run `git rebase` under any circumstances.
 - The summary line must be **lowercase** and **imperative mood** (e.g. `add`, `fix`, `update`, not `added`, `fixes`, `updating`)
 - No period at the end of the summary line
 - Keep the summary under 72 characters
