@@ -155,7 +155,7 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
           type="number"
           min={0}
           step={1}
-          placeholder="Interval (s) — blank for default"
+          placeholder="Interval in seconds (default: 120)"
           value={intervalInput}
           onChange={(e) => setIntervalInput(e.target.value)}
           className={`h-8 text-xs ${!intervalValid ? 'border-destructive' : ''}`}

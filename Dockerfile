@@ -42,7 +42,7 @@ EXPOSE 8927
 EXPOSE 8928
 
 ENV PYTHONUNBUFFERED=1
-ENV SLIDESHOW_INTERVAL=60
+ENV SLIDESHOW_INTERVAL=120
 # DATA_DIR: mount a host directory here for persistent DB storage.
 # e.g. docker run -v /host/data:/data -e DATA_DIR=/data ...
 VOLUME ["/data"]

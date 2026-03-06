@@ -373,7 +373,7 @@ def main() -> None:
     parser.add_argument(
         "--interval",
         type=float,
-        default=float(os.environ.get("SLIDESHOW_INTERVAL", "60")),
+        default=float(os.environ.get("SLIDESHOW_INTERVAL", "120")),
         metavar="SECONDS",
     )
     parser.add_argument(
