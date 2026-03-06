@@ -25,6 +25,7 @@ sendspin-image-server = "sendspin_image_server.cli:main"
 dev = [
   "mypy==1.18.2",
   "ruff==0.14.5",
+  "python-semantic-release>=9.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -94,3 +95,19 @@ warn_unreachable = true
 warn_unused_configs = true
 warn_unused_ignores = true
 packages = ["sendspin_image_server"]
+
+[tool.semantic_release]
+version_toml = ["pyproject.toml:project.version"]
+branch = "main"
+commit_message = "chore(release): v{version} [skip ci]"
+tag_format = "v{version}"
+
+[tool.semantic_release.changelog]
+exclude_commit_patterns = [
+  "^chore",
+  "^ci",
+  "^Merge",
+]
+
+[tool.semantic_release.remote]
+type = "github"
