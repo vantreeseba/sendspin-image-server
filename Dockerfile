@@ -30,8 +30,9 @@ COPY sendspin_image_server/ ./sendspin_image_server/
 # Copy the built UI into the package directory where cli.py expects it
 COPY --from=ui-builder /ui/dist/ ./sendspin_image_server/ui_dist/
 
-# Copy images directory (used for built-in local slideshow endpoint)
-COPY images/ ./images/
+# Create empty images directory — mount your own images here at runtime:
+# docker run -v /host/photos:/app/images ...
+RUN mkdir -p /app/images
 
 # Install the package itself
 RUN uv pip install --system --no-deps .
