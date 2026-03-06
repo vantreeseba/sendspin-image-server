@@ -218,4 +218,8 @@ __marimo__/
 ####
 images/
 
+# UI build artifacts
+ui/node_modules/
+ui/dist/
+
 

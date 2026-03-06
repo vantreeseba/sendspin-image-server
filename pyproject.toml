@@ -14,6 +14,8 @@ dependencies = [
   "zeroconf>=0.131.0",
   "aiohttp>=3.9.0",
   "Pillow>=10.0.0",
+  "numpy>=1.26.0",
+  "aiosqlite>=0.20.0",
 ]
 
 [project.scripts]
@@ -28,6 +30,9 @@ dev = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["sendspin_image_server*"]
+
+[tool.setuptools.package-data]
+sendspin_image_server = ["ui_dist/**/*"]
 
 [tool.ruff]
 fix = true
