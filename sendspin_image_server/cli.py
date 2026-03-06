@@ -312,7 +312,7 @@ async def run(
 
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, host, http_port)
+    site = web.TCPSite(runner, None, http_port)
     await site.start()
 
     logger.info("HTTP endpoint: http://%s:%d/", host, http_port)
