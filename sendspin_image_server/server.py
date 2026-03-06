@@ -16,30 +16,22 @@ from sendspin_image_server.client import (
     ArtworkChannel,
     ClientState,
     ROLE_ARTWORK,
-    ROLE_CONTROLLER,
     ROLE_METADATA,
-    ROLE_PLAYER,
     SUPPORTED_ROLES,
     server_time_us,
 )
 from sendspin_image_server.dither import DitheringAlgo
 from sendspin_image_server.stream import (
-    PCM_BIT_DEPTH,
-    PCM_CHANNELS,
-    PCM_SAMPLE_RATE,
     push_image_to_client,
-    send_silence_frames,
 )
 
 logger = logging.getLogger(__name__)
 
 SERVER_VERSION = 1
-GROUP_ID = str(uuid.uuid4())
-GROUP_NAME = "Image Server"
 
 
 class SendspinImageServer:
-    """Sendspin server that streams silence and pushes artwork to clients."""
+    """Sendspin server that pushes artwork to clients."""
 
     def __init__(self, server_id: str, server_name: str) -> None:
         self._server_id = server_id
@@ -203,7 +195,6 @@ class SendspinImageServer:
                 return None
 
         client: ClientState | None = None
-        silence_task: asyncio.Task[None] | None = None
         goodbye_reason: str | None = None
 
         try:
@@ -230,7 +221,7 @@ class SendspinImageServer:
             # Step 2: send server/hello
             await self._send_server_hello(client, connection_reason=connection_reason)
 
-            # Step 3: send stream/start (with player config so audio clients stay happy)
+            # Step 3: send stream/start
             await self._send_stream_start(client)
             client.stream_started = True
 
@@ -245,19 +236,10 @@ class SendspinImageServer:
                         exc,
                     )
 
-            # Step 4: send group/update
-            await self._send_group_update(client)
-
-            # Step 5: send server/state for metadata/controller clients
+            # Step 4: send server/state for metadata clients
             await self._send_server_state(client)
 
-            # Step 6: start silence loop for player clients (background task)
-            if client.has_player:
-                silence_task = asyncio.create_task(
-                    send_silence_frames(client), name=f"silence-{client.client_id}"
-                )
-
-            # Step 7: message loop
+            # Step 5: message loop
             async for raw_msg in websocket:
                 if isinstance(raw_msg, str):
                     parsed = json.loads(raw_msg)
@@ -279,8 +261,6 @@ class SendspinImageServer:
         except Exception:
             logger.exception("Unhandled error in connection handler")
         finally:
-            if silence_task is not None:
-                silence_task.cancel()
             if client is not None:
                 self._clients.pop(client.client_id, None)
                 logger.info("Client disconnected: %s (%s)", client.name, client.client_id)
@@ -372,14 +352,6 @@ class SendspinImageServer:
     async def _send_stream_start(self, client: ClientState) -> None:
         payload: dict[str, Any] = {}
 
-        if client.has_player:
-            payload["player"] = {
-                "codec": "pcm",
-                "sample_rate": PCM_SAMPLE_RATE,
-                "channels": PCM_CHANNELS,
-                "bit_depth": PCM_BIT_DEPTH,
-            }
-
         if client.has_artwork and client.artwork_channels:
             channels = []
             for ch in client.artwork_channels:
@@ -399,44 +371,28 @@ class SendspinImageServer:
         if payload:
             await self._send(client, {"type": "stream/start", "payload": payload})
 
-    async def _send_group_update(self, client: ClientState) -> None:
+    async def _send_server_state(self, client: ClientState) -> None:
+        if not client.has_metadata:
+            return
         await self._send(
             client,
             {
-                "type": "group/update",
+                "type": "server/state",
                 "payload": {
-                    "playback_state": "playing",
-                    "group_id": GROUP_ID,
-                    "group_name": GROUP_NAME,
+                    "metadata": {
+                        "timestamp": server_time_us(),
+                        "title": "Image Server",
+                        "artist": None,
+                        "album": None,
+                        "progress": {
+                            "track_progress": 0,
+                            "track_duration": 0,
+                            "playback_speed": 1000,
+                        },
+                    },
                 },
             },
         )
-
-    async def _send_server_state(self, client: ClientState) -> None:
-        payload: dict[str, Any] = {}
-
-        if client.has_metadata:
-            payload["metadata"] = {
-                "timestamp": server_time_us(),
-                "title": "Image Server",
-                "artist": None,
-                "album": None,
-                "progress": {
-                    "track_progress": 0,
-                    "track_duration": 0,
-                    "playback_speed": 1000,
-                },
-            }
-
-        if client.has_controller:
-            payload["controller"] = {
-                "supported_commands": ["play", "pause", "stop", "volume", "mute"],
-                "volume": 100,
-                "muted": False,
-            }
-
-        if payload:
-            await self._send(client, {"type": "server/state", "payload": payload})
 
     # ------------------------------------------------------------------
     # Inbound message dispatch
@@ -450,12 +406,6 @@ class SendspinImageServer:
 
         if msg_type == "client/time":
             await self._handle_client_time(client, payload)
-        elif msg_type == "client/state":
-            self._handle_client_state(client, payload)
-        elif msg_type == "client/command":
-            await self._handle_client_command(client, payload)
-        elif msg_type == "client/goodbye":
-            logger.info("Client %s said goodbye: %s", client.client_id, payload.get("reason"))
         elif msg_type == "stream/request-format":
             await self._handle_stream_request_format(client, payload)
         else:
@@ -479,39 +429,9 @@ class SendspinImageServer:
             },
         )
 
-    def _handle_client_state(self, client: ClientState, payload: dict[str, Any]) -> None:
-        player_state = payload.get("player")
-        if player_state and client.has_player:
-            if "volume" in player_state:
-                client.volume = int(player_state["volume"])
-            if "muted" in player_state:
-                client.muted = bool(player_state["muted"])
-
-    async def _handle_client_command(
-        self, client: ClientState, payload: dict[str, Any]
-    ) -> None:
-        controller = payload.get("controller")
-        if controller and client.has_controller:
-            cmd = controller.get("command")
-            logger.debug("Controller command from %s: %s", client.client_id, cmd)
-            # For a silent-stream image server, most commands are no-ops
-            # but we acknowledge volume/mute by updating state and echoing back
-            if cmd == "volume":
-                vol = int(controller.get("volume", 100))
-                for c in self._clients.values():
-                    if c.has_player:
-                        c.volume = vol
-            elif cmd == "mute":
-                muted = bool(controller.get("mute", False))
-                for c in self._clients.values():
-                    if c.has_player:
-                        c.muted = muted
-
     async def _handle_stream_request_format(
         self, client: ClientState, payload: dict[str, Any]
     ) -> None:
-        # For player format requests we just re-send the same PCM config
-        # For artwork format requests we update channel config
         aw_req = payload.get("artwork")
         if aw_req and client.has_artwork:
             ch_idx: int = int(aw_req.get("channel", 0))
@@ -524,7 +444,7 @@ class SendspinImageServer:
                 if "media_width" in aw_req:
                     ch.media_width = int(aw_req["media_width"])
                 if "media_height" in aw_req:
-                     ch.media_height = int(aw_req["media_height"])
+                    ch.media_height = int(aw_req["media_height"])
 
         await self._send_stream_start(client)
 
