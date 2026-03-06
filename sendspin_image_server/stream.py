@@ -1,4 +1,4 @@
-"""Audio stream (silence) and artwork push logic."""
+"""Artwork push logic."""
 
 from __future__ import annotations
 
@@ -6,42 +6,19 @@ import asyncio
 import io
 import logging
 import struct
-from typing import TYPE_CHECKING
 
 from PIL import Image
 
 from sendspin_image_server.client import ClientState, server_time_us
 from sendspin_image_server.dither import DitheringAlgo, encode_pil, floyd_steinberg_e6
 
-if TYPE_CHECKING:
-    pass
-
 logger = logging.getLogger(__name__)
 
 # Binary message type bytes
-MSG_TYPE_AUDIO = 0x04
 MSG_TYPE_ARTWORK_CH0 = 0x08
 MSG_TYPE_ARTWORK_CH1 = 0x09
 MSG_TYPE_ARTWORK_CH2 = 0x0A
 MSG_TYPE_ARTWORK_CH3 = 0x0B
-
-# Silence frame interval in microseconds (20ms = typical opus frame)
-SILENCE_INTERVAL_US = 20_000
-# PCM silence: 20ms at 44100Hz stereo 16-bit = 20ms * 44100 * 2ch * 2bytes = 3528 bytes
-PCM_SAMPLE_RATE = 44100
-PCM_CHANNELS = 2
-PCM_BIT_DEPTH = 16
-PCM_FRAME_SAMPLES = int(PCM_SAMPLE_RATE * SILENCE_INTERVAL_US / 1_000_000)
-PCM_SILENCE_FRAME = bytes(PCM_FRAME_SAMPLES * PCM_CHANNELS * (PCM_BIT_DEPTH // 8))
-
-
-def build_audio_message(timestamp_us: int, audio_bytes: bytes = b"") -> bytes:
-    """Build a binary audio message (type 4).
-
-    Format: [0x04][8-byte big-endian int64 timestamp µs][audio bytes]
-    """
-    header = struct.pack(">Bq", MSG_TYPE_AUDIO, timestamp_us)
-    return header + audio_bytes
 
 
 def build_artwork_message(channel: int, timestamp_us: int, image_bytes: bytes) -> bytes:
@@ -58,27 +35,13 @@ def build_artwork_message(channel: int, timestamp_us: int, image_bytes: bytes) -
     return header + image_bytes
 
 
-async def send_silence_frames(client: ClientState) -> None:
-    """Continuously send silent PCM audio frames to a player client."""
-    interval_s = SILENCE_INTERVAL_US / 1_000_000
-    while True:
-        ts = server_time_us()
-        msg = build_audio_message(ts, PCM_SILENCE_FRAME)
-        try:
-            await client.websocket.send(msg)
-        except Exception:
-            logger.debug("Failed to send silence frame to %s", client.client_id)
-            break
-        await asyncio.sleep(interval_s)
-
-
 def _resize_for_channel(
     image_bytes: bytes, max_width: int, max_height: int
 ) -> bytes:
-    """Resize image to exactly max_width × max_height, centered with black bars.
+    """Resize image to exactly max_width × max_height, centered with white bars.
 
     The source image is scaled as large as possible while preserving aspect
-    ratio, then centered on a black canvas of exactly max_width × max_height.
+    ratio, then centered on a white canvas of exactly max_width × max_height.
     """
     src = Image.open(io.BytesIO(image_bytes))
     src.load()
@@ -93,8 +56,6 @@ def _resize_for_channel(
     src_rgb = src.convert("RGB")
     scaled = src_rgb.resize((scaled_w, scaled_h), Image.LANCZOS)
 
-    # Center on black canvas — add 1 before // 2 so odd remainders round to
-    # nearest rather than always flooring, keeping both sides as equal as possible
     canvas = Image.new("RGB", (max_width, max_height), (255, 255, 255))
     offset_x = (max_width - scaled_w) // 2
     offset_y = (max_height - scaled_h) // 2
