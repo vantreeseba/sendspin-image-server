@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
-import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -14,12 +12,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-ROLE_PLAYER = "player@v1"
 ROLE_ARTWORK = "artwork@v1"
-ROLE_CONTROLLER = "controller@v1"
 ROLE_METADATA = "metadata@v1"
 
-SUPPORTED_ROLES = {ROLE_PLAYER, ROLE_ARTWORK, ROLE_CONTROLLER, ROLE_METADATA}
+SUPPORTED_ROLES = {ROLE_ARTWORK, ROLE_METADATA}
 
 
 @dataclass
@@ -57,24 +53,11 @@ class ClientState:
     active_roles: list[str] = field(default_factory=list)
     artwork_channels: list[ArtworkChannel] = field(default_factory=list)
     stream_started: bool = False
-    volume: int = 100
-    muted: bool = False
-    group_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-
-    @property
-    def has_player(self) -> bool:
-        """Return True if this client has the player role active."""
-        return ROLE_PLAYER in self.active_roles
 
     @property
     def has_artwork(self) -> bool:
         """Return True if this client has the artwork role active."""
         return ROLE_ARTWORK in self.active_roles
-
-    @property
-    def has_controller(self) -> bool:
-        """Return True if this client has the controller role active."""
-        return ROLE_CONTROLLER in self.active_roles
 
     @property
     def has_metadata(self) -> bool:
