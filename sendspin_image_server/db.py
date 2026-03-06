@@ -45,15 +45,6 @@ CREATE TABLE IF NOT EXISTS assignments (
 );
 """
 
-# Migrations applied after schema creation (idempotent ALTER TABLE statements)
-_MIGRATIONS = [
-    # v1: add dither_algo column if it doesn't exist yet
-    "ALTER TABLE assignments ADD COLUMN dither_algo TEXT NOT NULL DEFAULT 'none'",
-    # v2: add interval column (0 = use server default)
-    "ALTER TABLE assignments ADD COLUMN interval REAL NOT NULL DEFAULT 0",
-]
-
-
 class Database:
     """Async SQLite wrapper for endpoint + assignment persistence."""
 
@@ -67,18 +58,7 @@ class Database:
         self._db.row_factory = aiosqlite.Row
         await self._db.executescript(_SCHEMA)
         await self._db.commit()
-        await self._run_migrations()
         logger.info("Database opened: %s", self._path)
-
-    async def _run_migrations(self) -> None:
-        assert self._db is not None
-        for sql in _MIGRATIONS:
-            try:
-                await self._db.execute(sql)
-                await self._db.commit()
-            except Exception:
-                # Column already exists or other harmless conflict — skip
-                pass
 
     async def close(self) -> None:
         if self._db is not None:
