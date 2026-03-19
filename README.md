@@ -1,173 +1,26 @@
 # sendspin-image-server
 
-A home-automation server that pushes artwork to e-Paper displays and other [Sendspin](https://sendspin.com)-compatible clients on your local network. It discovers clients automatically via mDNS, manages multiple image sources ("Image Providers"), and serves a React web UI for configuration.
+A home server that automatically pushes artwork to [Sendspin](https://sendspin.com)-compatible e-Paper displays — like Waveshare e-ink picture frames — on your local network. Point it at your photos, and it handles everything else: finding your displays, cycling through images on a schedule, and converting colours to match what your display can actually show.
 
 ---
 
 ## Contents
 
-- [How it works](#how-it-works)
+- [Getting Started](#getting-started)
+- [Persistent Storage](#persistent-storage)
+- [Mounting Your Photos](#mounting-your-photos)
+- [docker-compose](#docker-compose)
+- [The Web UI](#the-web-ui)
 - [Image Providers](#image-providers)
 - [Dithering](#dithering)
-- [Web UI](#web-ui)
-- [REST API](#rest-api)
-- [Deploying on a local Docker machine](#deploying-on-a-local-docker-machine)
-  - [Quick start](#quick-start)
-  - [With a remote Docker daemon](#with-a-remote-docker-daemon)
-  - [Persistent data](#persistent-data)
-  - [Mounting local images](#mounting-local-images)
-  - [docker-compose](#docker-compose)
-- [Configuration reference](#configuration-reference)
-- [CI / publishing](#ci--publishing)
+- [Configuration](#configuration)
+- [For Developers](#for-developers)
 
 ---
 
-## How it works
+## Getting Started
 
-```
-┌──────────────────────────────────────────────────────┐
-│                 sendspin-image-server                │
-│                                                      │
-│  ┌─────────────┐   ┌──────────────┐                 │
-│  │ Image       │   │  Endpoint    │                 │
-│  │ Providers   │──▶│  Registry   │──▶ resize+dither │
-│  │ (local /    │   │  feed loops  │       │         │
-│  │  immich /   │   └──────────────┘       ▼         │
-│  │  HA)        │               WebSocket push       │
-│  └─────────────┘                    │               │
-│                                     │               │
-│  ┌──────────────┐    mDNS discover  │               │
-│  │  React UI    │    ◀─────────────▶│               │
-│  │  (port 8928) │                   ▼               │
-│  └──────────────┘           e-Paper display         │
-└──────────────────────────────────────────────────────┘
-```
-
-1. **mDNS discovery** — the server advertises itself as `_sendspin-server._tcp.local.` and discovers clients advertising `_sendspin._tcp.local.`. It opens outbound WebSocket connections to clients automatically and reconnects with exponential backoff if they go offline.
-
-2. **Sendspin protocol** — a binary+JSON WebSocket protocol. Clients declare roles (`player@v1`, `artwork@v1`); the server performs a handshake, then streams silent PCM audio (to keep audio-player clients alive) and pushes artwork frames on each assigned provider's schedule.
-
-3. **Per-client feed loops** — each Image Provider runs its own asyncio loop. Every second the loop checks which assigned clients are due for a new image based on their individual interval setting, fetches the next image from the provider, resizes it to each client's declared pixel dimensions (letterboxed on white), applies the client's chosen dither algorithm, and pushes the result over WebSocket.
-
-4. **Persistence** — if `DATA_DIR` is set, a SQLite database (`sendspin.db`) stores provider configurations and per-client settings (endpoint assignment, dither algorithm, interval). State is restored on restart.
-
----
-
-## Image Providers
-
-Three provider types are supported. All are managed through the web UI or REST API — no restart required.
-
-### Local folder
-
-Cycles through image files in a directory on the server's filesystem. The built-in provider points to `/app/images` (see [Mounting local images](#mounting-local-images)); it cannot be deleted.
-
-| Field  | Required | Description                          |
-|--------|----------|--------------------------------------|
-| `name` | yes      | Display name                         |
-| `path` | yes      | Absolute path to a directory of images |
-
-Supported file types: `.jpg`, `.jpeg`, `.png`, `.bmp`, `.webp`.
-
-### Immich
-
-Streams images from an [Immich](https://immich.app) album in order. The album asset list is refreshed at the start of each cycle so newly added photos are picked up automatically.
-
-| Field      | Required | Description                          |
-|------------|----------|--------------------------------------|
-| `name`     | yes      | Display name                         |
-| `base_url` | yes      | Immich server URL, e.g. `http://192.168.1.10:2283` |
-| `album_id` | yes      | UUID of the album                    |
-| `api_key`  | yes      | Immich API key (`x-api-key` header)  |
-
-### Home Assistant
-
-Browses the HA Media Browser tree via the HA WebSocket API and downloads images. Walks the tree recursively (depth ≤ 6) collecting all image-type leaf nodes.
-
-| Field              | Required | Default                          | Description                           |
-|--------------------|----------|----------------------------------|---------------------------------------|
-| `name`             | yes      | —                                | Display name                          |
-| `base_url`         | yes      | —                                | HA base URL, e.g. `http://homeassistant.local:8123` |
-| `token`            | yes      | —                                | Long-Lived Access Token               |
-| `media_content_id` | no       | `media-source://media_source`    | Starting node in the Media Browser    |
-
----
-
-## Dithering
-
-The primary target display is the **Waveshare 7.3" e-Paper (E)** — a 6-colour ACeP panel. Images are snapped to its palette using a prebuilt CIE L\*a\*b\* nearest-colour LUT (262 144 entries, built at import time). A 1.2× contrast and 1.3× saturation boost is applied before dithering.
-
-**Palette:**
-
-| Ink    | RGB              |
-|--------|------------------|
-| Black  | (0, 0, 0)        |
-| White  | (255, 255, 255)  |
-| Green  | (0, 255, 0)      |
-| Blue   | (0, 0, 255)      |
-| Red    | (255, 0, 0)      |
-| Yellow | (255, 255, 0)    |
-
-**Algorithms** (configurable per client in the UI):
-
-| Value                        | Description |
-|------------------------------|-------------|
-| `none`                       | No dithering — pass through after contrast/saturation boost |
-| `floyd-steinberg`            | Error diffusion via Pillow's C engine (fastest) |
-| `floyd-steinberg-serpentine` | Bidirectional Floyd-Steinberg — alternates row direction to eliminate directional grain |
-| `atkinson`                   | Bill Atkinson's ¾-error diffusion — crisper highlights and contrast |
-| `ordered`                    | 8×8 Bayer ordered dithering — deterministic crosshatch, no error propagation |
-
----
-
-## Web UI
-
-The React SPA is served from `http://<host>:8928/`.
-
-- **Clients panel** — shows all connected Sendspin devices with their MAC address, resolution, and format. Per client you can set the image provider, dither algorithm, and slideshow interval, then apply all changes with a single **Update** button.
-- **Image Providers panel** — lists all providers. Add new ones (Immich, Home Assistant, or local folder) via the **Add Provider** button. The built-in local provider cannot be deleted.
-- **Theme** — defaults to dark mode; toggle with the Sun/Moon button in the top-right corner. Preference is stored in `localStorage`.
-
-### Screenshots
-
-**Connected clients — dark mode**
-
-![Connected clients, dark mode](docs/screenshots/ui-dark.png)
-
-**Connected clients — light mode**
-
-![Connected clients, light mode](docs/screenshots/ui-light.png)
-
-**Image Providers panel**
-
-![Image Providers panel](docs/screenshots/ui-providers.png)
-
-**Add image provider dialog**
-
-![Add image provider dialog](docs/screenshots/ui-add-provider.png)
-
----
-
-## REST API
-
-Base URL: `http://<host>:8928`
-
-| Method   | Path                           | Body                                                | Description                                        |
-|----------|--------------------------------|-----------------------------------------------------|----------------------------------------------------|
-| `GET`    | `/api/clients`                 | —                                                   | List connected clients                             |
-| `GET`    | `/api/endpoints`               | —                                                   | List all image providers                           |
-| `POST`   | `/api/endpoints`               | `{kind, name, ...}`                                 | Add a provider                                     |
-| `DELETE` | `/api/endpoints/{id}`          | —                                                   | Remove a provider (403 if built-in)                |
-| `POST`   | `/api/clients/{id}/endpoint`   | `{"endpoint_id": "<id>"}`                           | Assign a client to a provider                      |
-| `POST`   | `/api/clients/{id}/dither`     | `{"dither_algo": "<algo>"}`                         | Set per-client dither algorithm                    |
-| `POST`   | `/api/clients/{id}/interval`   | `{"interval": <seconds>}` (0 = server default)      | Set per-client slideshow interval                  |
-| `POST`   | `/image`                       | raw image bytes; `?channel=N`                       | Push an image to all connected artwork clients     |
-| `GET`    | `/debug/current-image`         | —                                                   | Return the last-pushed image as a dithered PNG     |
-
----
-
-## Deploying on a local Docker machine
-
-### Quick start
+The server runs as a Docker container. The one important flag is `--network host`: without it, Docker's network isolation blocks the multicast traffic that lets the server find your displays automatically. Think of it as telling Docker to share your computer's network directly rather than putting the container behind a virtual switch.
 
 ```bash
 docker run -d \
@@ -179,47 +32,31 @@ docker run -d \
   ghcr.io/vantreeseba/sendspin-image-server:main
 ```
 
-> `--network host` is required for mDNS multicast to work. Without it the server cannot advertise itself or discover clients on the local network.
+Then open `http://<your-server>:8928` in a browser. Your displays should appear in the Clients panel within a few seconds of powering on.
 
-Open `http://<your-docker-host>:8928` to access the UI.
+> **Why `--network host`?** Your e-Paper displays announce themselves over a local network protocol called mDNS — the same technology behind `.local` hostnames. Docker's default networking mode doesn't pass that traffic through to containers, so the server would never hear the displays calling out. `--network host` fixes this by letting the container use your machine's network directly.
 
-### With a remote Docker daemon
+---
 
-If your Docker daemon runs on a different machine (e.g. a home server at `docker.lan`):
+## Persistent Storage
 
-```bash
-export DOCKER_HOST=tcp://docker.lan:2375
-
-docker pull ghcr.io/vantreeseba/sendspin-image-server:main
-
-docker rm -f sendspin-image-server
-
-docker run -d \
-  --name sendspin-image-server \
-  --network host \
-  -e DATA_DIR=/data \
-  -v sendspin-data:/data \
-  -v /path/to/photos:/app/images \
-  ghcr.io/vantreeseba/sendspin-image-server:main
-```
-
-### Persistent data
-
-Mount a volume or host directory at `/data` and set `DATA_DIR=/data`. The server writes `sendspin.db` there, storing all provider configurations and per-client settings across restarts.
+Without a persistent volume, all your provider settings and per-display configuration will be lost when the container restarts. To keep them, mount a volume and set `DATA_DIR`:
 
 ```bash
-# Named volume (recommended)
+# Using a named Docker volume (recommended)
 -v sendspin-data:/data -e DATA_DIR=/data
 
-# Or a host path
+# Or a folder on your host
 -v /srv/sendspin:/data -e DATA_DIR=/data
 ```
 
-Without `DATA_DIR`, the server runs without persistence — providers and assignments must be reconfigured after each restart.
+The server writes a small SQLite database called `sendspin.db` to that directory. It stores your image provider credentials, which provider each display is assigned to, dither settings, and slideshow intervals.
 
-### Mounting local images
+---
 
-The built-in local provider looks for images at `/app/images` inside the container. Mount your photo directory there:
+## Mounting Your Photos
+
+The built-in "Local Images" provider looks for photos at `/app/images` inside the container. Mount your photo directory there at startup:
 
 ```bash
 -v /path/to/your/photos:/app/images
@@ -227,7 +64,13 @@ The built-in local provider looks for images at `/app/images` inside the contain
 
 Supported formats: JPEG, PNG, BMP, WebP.
 
-### docker-compose
+You can also add additional local folders later through the web UI — see [Image Providers](#image-providers).
+
+---
+
+## docker-compose
+
+This is the most convenient way to run the server. Save the following as `docker-compose.yml` and run `docker compose up -d`.
 
 ```yaml
 services:
@@ -246,46 +89,142 @@ volumes:
   sendspin-data:
 ```
 
-With an Immich provider (added via UI after first start, or pre-configured):
-
-```yaml
-    environment:
-      DATA_DIR: /data
-```
-
-> Immich credentials are stored in the database after you add the provider through the UI — no environment variables needed.
+Replace `/path/to/your/photos` with the actual path to your photo folder. If you are using Immich or Home Assistant as your image source, you can leave the photos volume out entirely and add those providers through the UI after the first start — no environment variables needed for their credentials.
 
 ---
 
-## Configuration reference
+## The Web UI
 
-| Environment variable | CLI flag        | Default                 | Description                                                                 |
-|----------------------|-----------------|-------------------------|-----------------------------------------------------------------------------|
-| `DATA_DIR`           | `--data-dir`    | *(none)*                | Path for SQLite persistence. Omit to run stateless.                         |
-| `WS_PORT`            | `--port`        | `8927`                  | WebSocket (Sendspin protocol) port                                          |
-| `HTTP_PORT`          | `--http-port`   | `8928`                  | HTTP / REST API / Web UI port                                               |
-| —                    | `--host`        | `0.0.0.0`               | Bind address for both servers                                               |
-| —                    | `--interval`    | `120`                   | Seconds between image advances (server-wide default; overridable per client)|
-| —                    | `--dither-algo` | `none`                  | Default dither algorithm; overridable per client in the UI                  |
-| —                    | `--name`        | `Sendspin Image Server` | Server display name (shown in mDNS and client handshake)                    |
-| —                    | `--log-level`   | `INFO`                  | One of `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`                      |
+Open `http://<your-server>:8928` to reach the dashboard. There are two main panels.
+
+### Clients panel
+
+Shows every display the server knows about, in three states:
+
+- **Online** (green) — currently connected and receiving images
+- **Offline** (red) — known to the server (it has seen this display before), but not currently reachable
+- **Discovered** (amber) — spotted on the network but never fully connected yet
+
+For each display you can configure:
+
+- **Image Provider** — which photo source to use
+- **Dither algorithm** — how to convert colours for the display's limited palette (see [Dithering](#dithering))
+- **Palette** — the colour set to target (Full Color, Black & White, or E-Paper 6-Color)
+- **Slideshow interval** — how often to advance to the next image (in seconds; leave at 0 to use the server-wide default)
+
+Hit **Update** to apply any changes.
+
+Two additional buttons appear on displays that are not currently connected:
+
+- **Force Connect** — tells the server to try reconnecting to that display immediately, using the last known address
+- **Forget** — removes the display from the server's memory entirely (useful for displays you no longer have)
+
+### Image Providers panel
+
+Lists all configured image sources. The "Local Images" provider pointing at `/app/images` is always present and cannot be removed. Click **Add Provider** to add an Immich album, Home Assistant media folder, or another local directory. Providers can be removed at any time (except the built-in one) without restarting.
+
+### Theme
+
+The UI defaults to dark mode. Toggle light/dark with the sun/moon button in the top-right corner. Your preference is remembered in the browser.
 
 ---
 
-## CI / publishing
+## Image Providers
 
-Every push to `main` and every `v*` tag triggers a GitHub Actions workflow that builds the container image and pushes it to both registries:
+Three types of image source are supported. All are managed live through the web UI — no restart required.
 
-- `ghcr.io/vantreeseba/sendspin-image-server`
-- `docker.io/vantreeseba/sendspin-image-server`
+### Local folder
 
-Tags produced: `main`, `sha-<short>`, and for version tags: `1.2.3` + `1.2`.
+Cycles through image files in a directory on the server's filesystem. The built-in provider points to `/app/images` (the volume you mount at startup) and cannot be deleted, but you can add additional local folders.
 
-Two repository secrets are required (Settings → Secrets and variables → Actions):
+| Field  | Required | Description                             |
+|--------|----------|-----------------------------------------|
+| `name` | yes      | A label for this provider in the UI     |
+| `path` | yes      | Absolute path to a directory of images  |
 
-| Secret               | Value                                    |
-|----------------------|------------------------------------------|
-| `DOCKERHUB_USERNAME` | Your Docker Hub username                 |
-| `DOCKERHUB_TOKEN`    | A Docker Hub Personal Access Token (Read & Write) |
+Supported file types: `.jpg`, `.jpeg`, `.png`, `.bmp`, `.webp`.
 
-`GITHUB_TOKEN` is provided automatically by GitHub Actions — no configuration needed for GHCR.
+### Immich
+
+Streams images from an [Immich](https://immich.app) photo library album. The album contents are refreshed at the start of each cycle, so newly uploaded photos are picked up automatically without any intervention.
+
+| Field      | Required | Description                                              |
+|------------|----------|----------------------------------------------------------|
+| `name`     | yes      | A label for this provider in the UI                      |
+| `base_url` | yes      | Your Immich server URL, e.g. `http://192.168.1.10:2283`  |
+| `album_id` | yes      | The UUID of the album (visible in the album's URL)       |
+| `api_key`  | yes      | An Immich API key (create one under Account Settings)    |
+
+### Home Assistant
+
+Pulls images from the Home Assistant Media Browser. The server browses the media tree starting at the path you specify, collects all image files it finds (recursing up to six levels deep), and cycles through them.
+
+| Field              | Required | Default                           | Description                                               |
+|--------------------|----------|-----------------------------------|-----------------------------------------------------------|
+| `name`             | yes      | —                                 | A label for this provider in the UI                       |
+| `base_url`         | yes      | —                                 | Your HA URL, e.g. `http://homeassistant.local:8123`       |
+| `token`            | yes      | —                                 | A Long-Lived Access Token (create one in your HA profile) |
+| `media_content_id` | no       | `media-source://media_source`     | The starting folder in the Media Browser                  |
+
+---
+
+## Dithering
+
+E-Paper displays can only show a small number of colours — the Waveshare 7.3" ACeP panel, for example, has exactly six inks. Dithering is the technique of mixing those six colours together in fine patterns to simulate the thousands of shades in a photograph.
+
+The server applies a small contrast and saturation boost before dithering (1.2× and 1.3× respectively) to compensate for the muted look e-Paper palettes can produce on real-world images.
+
+**Palette options:**
+
+| Value          | Description                                            |
+|----------------|--------------------------------------------------------|
+| `none`         | No palette restriction — pass the image through as-is |
+| `bw`           | Black and white only                                   |
+| `e6`           | 6-colour ACeP e-Paper (default)                        |
+
+**E-Paper 6-Color palette:**
+
+| Ink    | RGB             |
+|--------|-----------------|
+| Black  | (0, 0, 0)       |
+| White  | (255, 255, 255) |
+| Green  | (0, 255, 0)     |
+| Blue   | (0, 0, 255)     |
+| Red    | (255, 0, 0)     |
+| Yellow | (255, 255, 0)   |
+
+**Dithering algorithms** (configurable per display in the UI):
+
+| Value                        | Character                                                                                      |
+|------------------------------|------------------------------------------------------------------------------------------------|
+| `none`                       | No dithering — pixels are snapped to the nearest palette colour with no blending               |
+| `floyd-steinberg`            | The classic dithering algorithm; smooth results and fast                                       |
+| `floyd-steinberg-serpentine` | A variant that alternates scan direction each row, reducing the faint diagonal grain that standard Floyd-Steinberg can produce on smooth gradients |
+| `atkinson`                   | Spreads less error than Floyd-Steinberg, giving crisper highlights and a slightly punchier look |
+| `ordered`                    | Uses a repeating geometric pattern (Bayer matrix) instead of error diffusion — deterministic and good on images with smooth gradients |
+
+If you are not sure which to pick, `floyd-steinberg` is a solid default for most photos. Try `atkinson` for high-contrast artwork.
+
+---
+
+## Configuration
+
+All settings can be provided as environment variables or CLI flags. Environment variables take precedence over defaults; CLI flags take precedence over environment variables.
+
+| Environment variable | CLI flag        | Default                   | Description                                                                  |
+|----------------------|-----------------|---------------------------|------------------------------------------------------------------------------|
+| `DATA_DIR`           | `--data-dir`    | *(none)*                  | Directory for persistent storage. Omit to run without saving settings.       |
+| `WS_PORT`            | `--port`        | `8927`                    | Port for the internal Sendspin WebSocket protocol                            |
+| `HTTP_PORT`          | `--http-port`   | `8928`                    | Port for the web UI and REST API                                             |
+| —                    | `--host`        | `0.0.0.0`                 | Network address to listen on                                                 |
+| —                    | `--interval`    | `120`                     | Seconds between image advances (server-wide default; overridable per display)|
+| —                    | `--dither-algo` | `none`                    | Default dithering algorithm; overridable per display in the UI               |
+| —                    | `--dither-palette` | `e6`                   | Default colour palette; overridable per display in the UI                    |
+| —                    | `--name`        | `Sendspin Image Server`   | Server name shown to displays during connection                              |
+| —                    | `--log-level`   | `INFO`                    | Log verbosity: `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL`            |
+
+---
+
+## For Developers
+
+The full technical reference — protocol details, mDNS service types, connection lifecycle, dithering internals, database schema, REST API reference, and CI/build information — lives in [TECHNICAL.md](TECHNICAL.md).
