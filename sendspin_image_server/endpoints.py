@@ -15,12 +15,15 @@ Concrete implementations
 
 from __future__ import annotations
 
+import io as _io
 import json
 import logging
 import pathlib
 import uuid
 from abc import ABC, abstractmethod
 from typing import Any
+
+from PIL import Image, ImageOps
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +159,13 @@ class ImmichEndpoint(ImageEndpoint):
             ) as resp:
                 resp.raise_for_status()
                 data = await resp.read()
+        img = Image.open(_io.BytesIO(data))
+        img = ImageOps.exif_transpose(img)
+        img = img.convert("RGB")
+        buf = _io.BytesIO()
+        img.save(buf, format="JPEG", quality=95, subsampling=0)
+        data = buf.getvalue()
+        logger.info("Immich fetch_next: asset %r → %d bytes (EXIF-corrected)", asset_id, len(data))
         self._index = (self._index + 1) % len(self._assets)
         return data
 
