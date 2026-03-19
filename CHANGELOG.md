@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.3.0 (2026-03-19)
+
+### Features
+
+- Client management UI improvements
+  ([`aa8172e`](https://github.com/vantreeseba/sendspin-image-server/commit/aa8172edc3c7e3ae007f71f0301dcfc402d087a1))
+
+
 ## v1.2.0 (2026-03-06)
 
 ### Documentation
