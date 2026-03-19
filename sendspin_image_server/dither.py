@@ -1,4 +1,4 @@
-"""Dithering to the 7.3" e-Paper (E) six-color ACeP palette.
+"""Dithering to configurable palettes (e.g. the 7.3" e-Paper ACeP six-color palette).
 
 Supported algorithms (select via the DITHER_ALGO env var or the dither_to_pil()
 *algo* argument):
@@ -8,11 +8,16 @@ Supported algorithms (select via the DITHER_ALGO env var or the dither_to_pil()
   atkinson                   — Bill Atkinson's 3/4-error diffusion (pure Python)
   ordered                    — 8×8 Bayer ordered/threshold dithering (pure Python)
 
-All algorithms share the same nearest-colour lookup: a 6-bit-per-channel LUT
-(262 144 entries, built at import time) that maps any 8-bit RGB triple to the
-closest ACeP palette index using CIE L*a*b* distance.  Each bucket covers 4
-raw sRGB values (±2 counts max error per channel), compared to 16 values (±8)
-with a 4-bit LUT.
+Supported palettes:
+
+  none  — no palette restriction (full color, no dithering applied)
+  bw    — black and white (binary; two-color)
+  e6    — 7.3" e-Paper E six-color ACeP palette (Black, White, Green, Blue, Red, Yellow)
+
+All palette-based algorithms share the same nearest-colour lookup: a per-palette
+6-bit-per-channel LUT (262 144 entries, built on first use) that maps any 8-bit
+RGB triple to the closest palette index using CIE L*a*b* distance.  Each bucket
+covers 4 raw sRGB values (±2 counts max error per channel).
 
 The dithered image is returned as a PIL RGB Image; callers that need bytes use
 floyd_steinberg_e6() / encode_pil().
@@ -30,8 +35,25 @@ from PIL import Image, ImageEnhance
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Palette
+# Palette definitions
 # ---------------------------------------------------------------------------
+
+DitheringPalette = Literal["none", "bw", "e6"]
+DITHER_PALETTES: Final[tuple[str, ...]] = ("none", "bw", "e6")
+
+# Human-readable labels for each palette (used by UI)
+PALETTE_LABELS: Final[dict[str, str]] = {
+    "none": "Full Color (no dithering)",
+    "bw": "Black & White",
+    "e6": "E-Paper 6-Color",
+}
+
+# Black & White — two-color binary palette
+BW_PALETTE_RGB: Final[list[tuple[int, int, int]]] = [
+    (0,   0,   0),    # 0 Black
+    (255, 255, 255),  # 1 White
+]
+
 # These are the exact RGB values used by Waveshare's official epd7in3f driver
 # in its getbuffer() palette (see waveshare/e-Paper on GitHub).  The display
 # controller maps each 4-bit index to its physical ink; the driver sends pure
@@ -55,7 +77,20 @@ E6_PALETTE_RGB: Final[list[tuple[int, int, int]]] = [
     (255, 255, 0),    # 5 Yellow
 ]
 
+# Palette RGB values indexed by palette name
+PALETTE_RGB: Final[dict[str, list[tuple[int, int, int]]]] = {
+    "bw": BW_PALETTE_RGB,
+    "e6": E6_PALETTE_RGB,
+}
+
+# Palette sets for fast membership testing (e.g. debug pixel validation)
 E6_PALETTE_SET: Final[frozenset[tuple[int, int, int]]] = frozenset(E6_PALETTE_RGB)
+BW_PALETTE_SET: Final[frozenset[tuple[int, int, int]]] = frozenset(BW_PALETTE_RGB)
+
+PALETTE_SETS: Final[dict[str, frozenset[tuple[int, int, int]]]] = {
+    "bw": BW_PALETTE_SET,
+    "e6": E6_PALETTE_SET,
+}
 
 DitheringAlgo = Literal["none", "floyd-steinberg", "floyd-steinberg-serpentine", "atkinson", "ordered"]
 DITHER_ALGOS: Final[tuple[str, ...]] = ("none", "floyd-steinberg", "floyd-steinberg-serpentine", "atkinson", "ordered")
@@ -64,19 +99,23 @@ DITHER_ALGOS: Final[tuple[str, ...]] = ("none", "floyd-steinberg", "floyd-steinb
 # Pillow palette image (used only by floyd-steinberg path)
 # ---------------------------------------------------------------------------
 
-def _build_palette_image() -> Image.Image:
+def _build_palette_image(palette_rgb: list[tuple[int, int, int]]) -> Image.Image:
     pal_data: list[int] = []
-    for r, g, b in E6_PALETTE_RGB:
+    for r, g, b in palette_rgb:
         pal_data.extend([r, g, b])
-    pal_data += [0, 0, 0] * (256 - len(E6_PALETTE_RGB))
+    pal_data += [0, 0, 0] * (256 - len(palette_rgb))
     pal_img = Image.new("P", (1, 1))
     pal_img.putpalette(pal_data)
     return pal_img
 
-_PALETTE_IMAGE: Final[Image.Image] = _build_palette_image()
+# Pre-built palette images (one per named palette)
+_PALETTE_IMAGES: Final[dict[str, Image.Image]] = {
+    name: _build_palette_image(rgb)
+    for name, rgb in PALETTE_RGB.items()
+}
 
 # ---------------------------------------------------------------------------
-# Nearest-colour LUT  (shared by atkinson + ordered)
+# Nearest-colour LUT  (shared by atkinson + ordered, built per palette)
 # ---------------------------------------------------------------------------
 # sRGB → Lab conversion for perceptual nearest-colour matching.
 
@@ -99,21 +138,17 @@ def _rgb_to_lab(r: int, g: int, b: int) -> tuple[float, float, float]:
     return 116.0 * fy - 16.0, 500.0 * (fx - fy), 200.0 * (fy - fz)
 
 
-_E6_LAB: Final[list[tuple[float, float, float]]] = [
-    _rgb_to_lab(r, g, b) for r, g, b in E6_PALETTE_RGB
-]
-
 _LUT_BITS: Final[int] = 6             # bits per channel
 _LUT_SIZE: Final[int] = 1 << _LUT_BITS    # 64 steps per channel
 _LUT_STEP: Final[int] = 256 >> _LUT_BITS  # 4 raw sRGB values per bucket
 _LUT_SHIFT: Final[int] = 8 - _LUT_BITS   # right-shift to extract top _LUT_BITS bits (= 2)
 
 
-def _build_lut() -> np.ndarray:
+def _build_lut(palette_rgb: list[tuple[int, int, int]]) -> np.ndarray:
     """Build a 6-bit-per-channel LUT mapping (r>>2, g>>2, b>>2) → palette index.
 
     Returns a uint8 ndarray of shape (64, 64, 64).  Each cell holds the index
-    into E6_PALETTE_RGB of the perceptually closest colour (CIE L*a*b* ΔE²).
+    into *palette_rgb* of the perceptually closest colour (CIE L*a*b* ΔE²).
     Each bucket represents a 4-value range of raw sRGB; the midpoint is used
     as the representative sample (max assignment error ±2 counts per channel).
 
@@ -151,26 +186,34 @@ def _build_lut() -> np.ndarray:
     lab = np.stack([116.0 * fy - 16.0, 500.0 * (fx - fy), 200.0 * (fy - fz)], axis=-1)
     # lab shape: (N, 3)
 
-    # Palette Lab values — shape (6, 3)
-    pal_lab = np.array(_E6_LAB, dtype=np.float64)
+    # Palette Lab values — shape (P, 3)
+    pal_lab_list = [_rgb_to_lab(r, g, b) for r, g, b in palette_rgb]
+    pal_lab = np.array(pal_lab_list, dtype=np.float64)
 
-    # Squared ΔE² to each palette entry — (N, 6)
-    diff = lab[:, np.newaxis, :] - pal_lab[np.newaxis, :, :]  # (N,6,3)
-    dist2 = (diff ** 2).sum(axis=-1)                           # (N,6)
+    # Squared ΔE² to each palette entry — (N, P)
+    diff = lab[:, np.newaxis, :] - pal_lab[np.newaxis, :, :]  # (N,P,3)
+    dist2 = (diff ** 2).sum(axis=-1)                           # (N,P)
 
     best = dist2.argmin(axis=-1).astype(np.uint8)              # (N,)
     return best.reshape(n, n, n)
 
 
-_LUT: Final[np.ndarray] = _build_lut()
+# Pre-built LUTs and palette numpy arrays, indexed by palette name.
+_LUTS: Final[dict[str, np.ndarray]] = {
+    name: _build_lut(rgb)
+    for name, rgb in PALETTE_RGB.items()
+}
+_PAL_NPS: Final[dict[str, np.ndarray]] = {
+    name: np.array(rgb, dtype=np.uint8)
+    for name, rgb in PALETTE_RGB.items()
+}
 
-# Palette as a numpy array for fast index→RGB lookup in _nearest
-_PAL_NP: Final[np.ndarray] = np.array(E6_PALETTE_RGB, dtype=np.uint8)
 
-
-def _nearest(r: int, g: int, b: int) -> tuple[int, int, int]:
+def _nearest(r: int, g: int, b: int, palette: DitheringPalette) -> tuple[int, int, int]:
     """Return the palette RGB colour closest to (r, g, b) via LUT."""
-    rgb = _PAL_NP[int(_LUT[r >> _LUT_SHIFT, g >> _LUT_SHIFT, b >> _LUT_SHIFT])]
+    lut = _LUTS[palette]
+    pal_np = _PAL_NPS[palette]
+    rgb = pal_np[int(lut[r >> _LUT_SHIFT, g >> _LUT_SHIFT, b >> _LUT_SHIFT])]
     return int(rgb[0]), int(rgb[1]), int(rgb[2])
 
 
@@ -190,13 +233,13 @@ def _preprocess(img: Image.Image) -> Image.Image:
 # Algorithm implementations
 # ---------------------------------------------------------------------------
 
-def _floyd_steinberg(img: Image.Image) -> Image.Image:
+def _floyd_steinberg(img: Image.Image, palette: DitheringPalette) -> Image.Image:
     """Floyd-Steinberg via Pillow's C quantize engine."""
-    dithered = img.quantize(palette=_PALETTE_IMAGE, dither=Image.Dither.FLOYDSTEINBERG)
+    dithered = img.quantize(palette=_PALETTE_IMAGES[palette], dither=Image.Dither.FLOYDSTEINBERG)
     return dithered.convert("RGB")
 
 
-def _serpentine_floyd_steinberg(img: Image.Image) -> Image.Image:
+def _serpentine_floyd_steinberg(img: Image.Image, palette: DitheringPalette) -> Image.Image:
     """Serpentine Floyd-Steinberg error diffusion (pure Python, Lab LUT).
 
     Identical to standard Floyd-Steinberg (7/5/3/1 kernel) but alternates
@@ -237,7 +280,7 @@ def _serpentine_floyd_steinberg(img: Image.Image) -> Image.Image:
         for x in xs:
             o = (y * w + x) * 3
             or_, og, ob = buf[o], buf[o + 1], buf[o + 2]
-            pr, pg, pb = _nearest(or_, og, ob)
+            pr, pg, pb = _nearest(or_, og, ob, palette)
             out[o], out[o + 1], out[o + 2] = pr, pg, pb
 
             er, eg, eb = or_ - pr, og - pg, ob - pb
@@ -251,7 +294,7 @@ def _serpentine_floyd_steinberg(img: Image.Image) -> Image.Image:
     return Image.frombytes("RGB", (w, h), bytes(out))
 
 
-def _atkinson(img: Image.Image) -> Image.Image:
+def _atkinson(img: Image.Image, palette: DitheringPalette) -> Image.Image:
     """Atkinson dithering — distributes 3/4 of the error to 6 neighbours.
 
     Atkinson spreads less error than Floyd-Steinberg, which tends to preserve
@@ -278,7 +321,7 @@ def _atkinson(img: Image.Image) -> Image.Image:
     for y in range(h):
         for x in range(w):
             or_, og, ob = get(x, y)
-            pr, pg, pb = _nearest(or_, og, ob)
+            pr, pg, pb = _nearest(or_, og, ob, palette)
             o = (y * w + x) * 3
             out[o], out[o + 1], out[o + 2] = pr, pg, pb
             # Atkinson distributes 1/8 of the error to each of 6 neighbours
@@ -313,7 +356,7 @@ _BAYER_OFFSETS: Final[list[list[int]]] = [
 ]
 
 
-def _ordered(img: Image.Image) -> Image.Image:
+def _ordered(img: Image.Image, palette: DitheringPalette) -> Image.Image:
     """8×8 Bayer ordered dithering.
 
     Adds a spatially-varying threshold offset to each pixel before snapping to
@@ -333,7 +376,7 @@ def _ordered(img: Image.Image) -> Image.Image:
             r = max(0, min(255, raw[o]     + threshold))
             g = max(0, min(255, raw[o + 1] + threshold))
             b = max(0, min(255, raw[o + 2] + threshold))
-            pr, pg, pb = _nearest(r, g, b)
+            pr, pg, pb = _nearest(r, g, b, palette)
             out[o], out[o + 1], out[o + 2] = pr, pg, pb
 
     return Image.frombytes("RGB", (w, h), bytes(out))
@@ -343,27 +386,36 @@ def _ordered(img: Image.Image) -> Image.Image:
 # Public API
 # ---------------------------------------------------------------------------
 
-def dither_to_pil(image_bytes: bytes, algo: DitheringAlgo = "floyd-steinberg") -> Image.Image:
-    """Dither *image_bytes* to the 6-color palette and return a PIL RGB Image.
+def dither_to_pil(
+    image_bytes: bytes,
+    algo: DitheringAlgo = "floyd-steinberg",
+    palette: DitheringPalette = "e6",
+) -> Image.Image:
+    """Dither *image_bytes* to the given *palette* and return a PIL RGB Image.
 
     :param algo: One of ``"floyd-steinberg"``, ``"floyd-steinberg-serpentine"``,
-                 ``"atkinson"``, ``"ordered"``.
-    :returns: RGB PIL Image whose pixels are all members of E6_PALETTE_RGB.
+                 ``"atkinson"``, ``"ordered"``, or ``"none"`` (pass-through).
+    :param palette: One of ``"none"`` (full color), ``"bw"`` (black & white),
+                    or ``"e6"`` (6-color e-Paper).
+    :returns: RGB PIL Image whose pixels are all members of the chosen palette
+              (or the original image if palette/algo is ``"none"``).
     """
     src = Image.open(io.BytesIO(image_bytes))
     src.load()
     img = _preprocess(src)
 
-    if algo == "none":
+    # If palette is "none" or algo is "none", return without dithering
+    if palette == "none" or algo == "none":
         return img
+
     if algo == "floyd-steinberg":
-        return _floyd_steinberg(img)
+        return _floyd_steinberg(img, palette)
     if algo == "floyd-steinberg-serpentine":
-        return _serpentine_floyd_steinberg(img)
+        return _serpentine_floyd_steinberg(img, palette)
     if algo == "atkinson":
-        return _atkinson(img)
+        return _atkinson(img, palette)
     if algo == "ordered":
-        return _ordered(img)
+        return _ordered(img, palette)
     msg = f"Unknown dithering algorithm: {algo!r}. Choose from {DITHER_ALGOS}"
     raise ValueError(msg)
 
@@ -383,21 +435,23 @@ def floyd_steinberg_e6(
     image_bytes: bytes,
     algo: DitheringAlgo = "floyd-steinberg",
     output_format: str = "JPEG",
+    palette: DitheringPalette = "e6",
 ) -> bytes:
     """Dither *image_bytes* and return encoded bytes in *output_format*.
 
     :param output_format: Pillow format string (e.g. ``"JPEG"``, ``"PNG"``).
                           Defaults to ``"JPEG"``.
+    :param palette: The colour palette to restrict pixels to. Defaults to ``"e6"``.
     """
     src = Image.open(io.BytesIO(image_bytes))
     src.load()
     orig_size = src.size
 
-    out = dither_to_pil(image_bytes, algo=algo)
+    out = dither_to_pil(image_bytes, algo=algo, palette=palette)
     result = encode_pil(out, output_format)
 
     logger.debug(
-        "e6 dither (%s) complete: %dx%d → %s  %d bytes → %d bytes",
-        algo, orig_size[0], orig_size[1], output_format, len(image_bytes), len(result),
+        "dither (%s, palette=%s) complete: %dx%d → %s  %d bytes → %d bytes",
+        algo, palette, orig_size[0], orig_size[1], output_format, len(image_bytes), len(result),
     )
     return result

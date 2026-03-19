@@ -19,9 +19,20 @@ export const DITHERING_ALGOS: DitheringAlgo[] = [
   'ordered',
 ];
 
+export type DitheringPalette = 'none' | 'bw' | 'e6';
+
+export const DITHERING_PALETTES: DitheringPalette[] = ['none', 'bw', 'e6'];
+
+export const PALETTE_LABELS: Record<DitheringPalette, string> = {
+  none: 'Full Color (no dithering)',
+  bw: 'Black & White',
+  e6: 'E-Paper 6-Color',
+};
+
 export interface Client {
   id: string;
   name: string;
+  status: 'connected' | 'disconnected' | 'discovered';
   roles: string[];
   stream_started: boolean;
   artwork_channels: ArtworkChannel[];
@@ -29,7 +40,10 @@ export interface Client {
   endpoint_name: string | null;
   explicit_assignment: boolean;
   dither_algo: DitheringAlgo;
+  dither_palette: DitheringPalette;
   interval: number; // seconds; 0 = server default
+  discovered_url?: string | null;
+  discovered_only: boolean;
 }
 
 export interface Endpoint {

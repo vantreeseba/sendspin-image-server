@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import websockets
 import websockets.exceptions
@@ -20,10 +20,13 @@ from sendspin_image_server.client import (
     SUPPORTED_ROLES,
     server_time_us,
 )
-from sendspin_image_server.dither import DitheringAlgo
+from sendspin_image_server.dither import DitheringAlgo, DitheringPalette
 from sendspin_image_server.stream import (
     push_image_to_client,
 )
+
+if TYPE_CHECKING:
+    from sendspin_image_server.registry import EndpointRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +45,12 @@ class SendspinImageServer:
         self._last_image_channel: int = 0
         # url → task for server-initiated outbound connections
         self._outbound_tasks: dict[str, asyncio.Task[None]] = {}
+        # url → url: all URLs we are tracking (discovered via mDNS or connect_to_client)
+        self._discovered_clients: dict[str, str] = {}
+        # url → real client_id: populated after a successful client/hello handshake
+        self._url_to_client_id: dict[str, str] = {}
+        # Optional back-reference to the registry — set by cli.py after both are created
+        self._registry: EndpointRegistry | None = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -56,6 +65,15 @@ class SendspinImageServer:
     def clients(self) -> dict[str, ClientState]:
         """Read-only view of currently connected clients."""
         return self._clients
+
+    @property
+    def registry(self) -> EndpointRegistry | None:
+        """The endpoint registry, if wired up."""
+        return self._registry
+
+    @registry.setter
+    def registry(self, value: EndpointRegistry) -> None:
+        self._registry = value
 
     async def start(self, host: str = "0.0.0.0", port: int = 8927) -> None:
         """Start the WebSocket server."""
@@ -87,6 +105,8 @@ class SendspinImageServer:
         """
         if url in self._outbound_tasks:
             return  # already managing this URL
+        # Register as discovered immediately — before any handshake succeeds.
+        self._discovered_clients[url] = url
         task = asyncio.create_task(
             self._outbound_connection_loop(url),
             name=f"outbound-{url}",
@@ -94,14 +114,54 @@ class SendspinImageServer:
         self._outbound_tasks[url] = task
         logger.info("Initiating server-initiated connection to %s", url)
 
+    def reconnect_to_client(self, url: str, connection_reason: str = "discovery") -> None:
+        """Cancel any existing outbound task for url and start a fresh one.
+
+        Unlike connect_to_client, this always starts a new loop even if one
+        is already running — useful for forcing a retry after a permanent
+        disconnect (e.g. 'another_server' goodbye).
+        """
+        existing = self._outbound_tasks.pop(url, None)
+        if existing is not None:
+            existing.cancel()
+        # Ensure the URL is tracked as discovered before spawning the loop.
+        self._discovered_clients[url] = url
+        task = asyncio.get_event_loop().create_task(
+            self._outbound_connection_loop(url, connection_reason=connection_reason),
+            name=f"outbound-{url}",
+        )
+        self._outbound_tasks[url] = task
+        logger.info("Force-reconnecting to %s", url)
+
     def disconnect_from_client(self, url: str) -> None:
         """Cancel the outbound connection task for a URL (client disappeared from mDNS)."""
         task = self._outbound_tasks.pop(url, None)
         if task is not None:
             task.cancel()
             logger.info("Cancelled outbound connection to %s", url)
+        self._discovered_clients.pop(url, None)
+        self._url_to_client_id.pop(url, None)
 
-    async def _outbound_connection_loop(self, url: str) -> None:
+    def get_discovered_urls(self) -> list[dict[str, str | None]]:
+        """Return all tracked URLs with their known client_id (if any)."""
+        return [
+            {"url": url, "client_id": self._url_to_client_id.get(url)}
+            for url in self._discovered_clients
+        ]
+
+    async def send_stream_start_to_client(self, client_id: str) -> bool:
+        """Send stream/start to a currently-connected client.
+
+        Returns True if the client was found and the message was sent.
+        Returns False if no connected client with that ID exists.
+        """
+        client = self._clients.get(client_id)
+        if client is None:
+            return False
+        await self._send_stream_start(client)
+        return True
+
+    async def _outbound_connection_loop(self, url: str, connection_reason: str = "discovery") -> None:
         """Retry loop for a server-initiated outbound WebSocket connection."""
         backoff = 1.0
         max_backoff = 300.0
@@ -112,7 +172,7 @@ class SendspinImageServer:
                         logger.info("Server-initiated connection established to %s", url)
                         backoff = 1.0  # reset on successful connect
                         goodbye_reason = await self._handle_connection(
-                            websocket, connection_reason="discovery"
+                            websocket, connection_reason=connection_reason, source_url=url,
                         )
                     # Don't reconnect if client said goodbye with 'another_server'
                     if goodbye_reason == "another_server":
@@ -134,6 +194,8 @@ class SendspinImageServer:
             pass
         finally:
             self._outbound_tasks.pop(url, None)
+            # Clear client_id mapping when the outbound loop exits entirely.
+            self._url_to_client_id.pop(url, None)
 
     async def broadcast_image(
         self,
@@ -142,11 +204,13 @@ class SendspinImageServer:
         *,
         force_e6_dither: bool = False,
         dither_algo: DitheringAlgo = "floyd-steinberg",
+        dither_palette: DitheringPalette = "e6",
     ) -> None:
         """Push an image to all connected artwork clients.
 
         *force_e6_dither* applies dithering to every client regardless of what
-        format they negotiated. *dither_algo* selects the algorithm used.
+        format they negotiated. *dither_algo* selects the algorithm and
+        *dither_palette* selects the colour palette used.
         Dithering always happens after per-client resizing.
         """
         self._last_image = image_bytes
@@ -161,6 +225,7 @@ class SendspinImageServer:
                     c, image_bytes, channel,
                     force_e6_dither=force_e6_dither,
                     dither_algo=dither_algo,
+                    dither_palette=dither_palette,
                 )
                 for c in artwork_clients
             ),
@@ -178,12 +243,18 @@ class SendspinImageServer:
         self,
         websocket: ServerConnection,
         connection_reason: str = "discovery",
+        source_url: str | None = None,
     ) -> str | None:
         """Handle a WebSocket connection from a Sendspin client.
 
         Works for both inbound (client-initiated) and outbound (server-initiated)
         connections.  Returns the client/goodbye reason string if the client
         disconnected gracefully, otherwise None.
+
+        *source_url* is the URL we dialled for outbound connections; when provided
+        the real client_id is stored in ``_url_to_client_id`` after a successful
+        client/hello so that discovered-but-disconnected entries can be matched
+        back to their last-known identity.
         """
         # For inbound connections the path is available on the request; for
         # outbound connections we already connected to the correct path.
@@ -209,7 +280,14 @@ class SendspinImageServer:
                 return None
 
             client = self._parse_client_hello(msg, websocket)
+            # Record the real client_id for this URL so that registry.client_info()
+            # can match the discovered entry to its known identity.
+            if source_url is not None:
+                self._url_to_client_id[source_url] = client.client_id
             self._clients[client.client_id] = client
+            # Persist the last-known URL so offline clients can be force-reconnected.
+            if self._registry is not None:
+                self._registry.ensure_client(client.client_id, name=client.name, url=source_url)
             logger.info(
                 "Client connected: %s (%s) roles=%s connection_reason=%s",
                 client.name,

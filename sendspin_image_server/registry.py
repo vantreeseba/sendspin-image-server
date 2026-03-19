@@ -7,7 +7,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any, cast
 
-from sendspin_image_server.dither import DitheringAlgo
+from sendspin_image_server.dither import DitheringAlgo, DitheringPalette
 from sendspin_image_server.endpoints import ImageEndpoint
 
 if TYPE_CHECKING:
@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _NO_DITHER_SENTINEL: DitheringAlgo = "none"
+_DEFAULT_PALETTE: DitheringPalette = "e6"
 
 
 class EndpointRegistry:
@@ -27,17 +28,21 @@ class EndpointRegistry:
         server: SendspinImageServer,
         interval: float,
         dither_algo: DitheringAlgo,
+        dither_palette: DitheringPalette = "e6",
         db: Database | None = None,
     ) -> None:
         self._server = server
         self._interval = interval
         self._dither_algo = dither_algo
+        self._dither_palette = dither_palette
         self._db = db
 
         self._endpoints: dict[str, ImageEndpoint] = {}
         self._assignments: dict[str, str | None] = {}
         self._client_dither: dict[str, DitheringAlgo] = {}  # per-client override
+        self._client_palette: dict[str, DitheringPalette] = {}  # per-client palette override
         self._client_interval: dict[str, float] = {}  # per-client override; 0 = use server default
+        self._client_last_url: dict[str, str] = {}  # client_id → last successfully connected URL
         self._default_endpoint_id: str | None = None
         self._tasks: dict[str, asyncio.Task[None]] = {}
 
@@ -46,9 +51,16 @@ class EndpointRegistry:
     # ------------------------------------------------------------------
 
     async def restore_from_db(self, builtin_endpoint_id: str) -> None:
-        """Reload persisted non-builtin endpoints and client assignments from DB."""
+        """Reload persisted non-builtin endpoints, client assignments, and last-known URLs from DB."""
         if self._db is None:
             return
+
+        client_url_rows = await self._db.load_client_urls()
+        for client_id, row in client_url_rows.items():
+            url = row.get("last_known_url")
+            if url:
+                self._client_last_url[client_id] = url
+                logger.debug("Restored last-known URL for client %s: %s", client_id, url)
 
         from sendspin_image_server.endpoints import HomeAssistantEndpoint, ImmichEndpoint, LocalFolderEndpoint
         import pathlib
@@ -97,14 +109,16 @@ class EndpointRegistry:
         for client_id, row in assignments.items():
             endpoint_id = row["endpoint_id"]
             dither_algo = row.get("dither_algo", self._dither_algo)
+            dither_palette = row.get("dither_palette", self._dither_palette)
             interval = float(row.get("interval", 0))
             if endpoint_id in self._endpoints:
                 self._assignments[client_id] = endpoint_id
                 self._client_dither[client_id] = dither_algo  # type: ignore[assignment]
+                self._client_palette[client_id] = dither_palette  # type: ignore[assignment]
                 self._client_interval[client_id] = interval
                 logger.info(
-                    "Restored assignment: client %s → endpoint %s (dither=%s, interval=%ss)",
-                    client_id, endpoint_id, dither_algo,
+                    "Restored assignment: client %s → endpoint %s (dither=%s, palette=%s, interval=%ss)",
+                    client_id, endpoint_id, dither_algo, dither_palette,
                     interval if interval > 0 else "default",
                 )
             else:
@@ -188,9 +202,10 @@ class EndpointRegistry:
             return False
         self._assignments[client_id] = endpoint_id
         algo = self._client_dither.get(client_id, self._dither_algo)
+        palette = self._client_palette.get(client_id, self._dither_palette)
         interval = self._client_interval.get(client_id, 0)
         if self._db is not None:
-            asyncio.ensure_future(self._db.save_assignment(client_id, endpoint_id, algo, interval))
+            asyncio.ensure_future(self._db.save_assignment(client_id, endpoint_id, algo, palette, interval))
         logger.info("Client %s assigned to endpoint %s", client_id, endpoint_id)
         return True
 
@@ -198,10 +213,21 @@ class EndpointRegistry:
         """Set the dithering algorithm for a specific client and persist it."""
         self._client_dither[client_id] = algo
         endpoint_id = self._assignments.get(client_id)
+        palette = self._client_palette.get(client_id, self._dither_palette)
         interval = self._client_interval.get(client_id, 0)
         if self._db is not None and endpoint_id:
-            asyncio.ensure_future(self._db.save_assignment(client_id, endpoint_id, algo, interval))
+            asyncio.ensure_future(self._db.save_assignment(client_id, endpoint_id, algo, palette, interval))
         logger.info("Client %s dither algo set to %s", client_id, algo)
+
+    def set_client_palette(self, client_id: str, palette: DitheringPalette) -> None:
+        """Set the dithering palette for a specific client and persist it."""
+        self._client_palette[client_id] = palette
+        endpoint_id = self._assignments.get(client_id)
+        algo = self._client_dither.get(client_id, self._dither_algo)
+        interval = self._client_interval.get(client_id, 0)
+        if self._db is not None and endpoint_id:
+            asyncio.ensure_future(self._db.save_assignment(client_id, endpoint_id, algo, palette, interval))
+        logger.info("Client %s dither palette set to %s", client_id, palette)
 
     def set_client_interval(self, client_id: str, interval: float) -> None:
         """Set the slideshow interval for a specific client and persist it.
@@ -211,23 +237,48 @@ class EndpointRegistry:
         self._client_interval[client_id] = interval
         endpoint_id = self._assignments.get(client_id)
         algo = self._client_dither.get(client_id, self._dither_algo)
+        palette = self._client_palette.get(client_id, self._dither_palette)
         if self._db is not None and endpoint_id:
-            asyncio.ensure_future(self._db.save_assignment(client_id, endpoint_id, algo, interval))
+            asyncio.ensure_future(self._db.save_assignment(client_id, endpoint_id, algo, palette, interval))
         logger.info("Client %s interval set to %ss", client_id, interval if interval > 0 else "default")
 
     def client_dither_algo(self, client_id: str) -> DitheringAlgo:
         """Return the effective dither algorithm for a client."""
         return cast("DitheringAlgo", self._client_dither.get(client_id, self._dither_algo))
 
+    def client_dither_palette(self, client_id: str) -> DitheringPalette:
+        """Return the effective dither palette for a client."""
+        return cast("DitheringPalette", self._client_palette.get(client_id, self._dither_palette))
+
     def client_interval(self, client_id: str) -> float:
         """Return the effective interval for a client (0 = server default)."""
         return self._client_interval.get(client_id, 0)
+
+    def ensure_client(self, client_id: str, name: str, url: str | None = None) -> None:
+        """Persist a client's identity and last-known URL.
+
+        Called after a successful hello handshake so that offline clients
+        can later be force-reconnected using their stored URL.
+        """
+        if url is None:
+            return
+        self._client_last_url[client_id] = url
+        if self._db is not None:
+            asyncio.ensure_future(self._db.upsert_client_url(client_id, name, url))
+        logger.debug("Recorded last-known URL for client %s (%s): %s", client_id, name, url)
 
     def unassign(self, client_id: str) -> None:
         """Remove explicit assignment; client falls back to default."""
         self._assignments.pop(client_id, None)
         if self._db is not None:
             asyncio.ensure_future(self._db.delete_assignment(client_id))
+
+    def delete_client(self, client_id: str) -> None:
+        """Forget a client entirely — removes DB record and in-memory state."""
+        if self._db is not None:
+            asyncio.ensure_future(self._db.delete_client(client_id))
+        self._assignments.pop(client_id, None)
+        self._client_last_url.pop(client_id, None)
 
     def effective_endpoint_id(self, client_id: str) -> str | None:
         return self._assignments.get(client_id, self._default_endpoint_id)
@@ -248,21 +299,29 @@ class EndpointRegistry:
     # ------------------------------------------------------------------
 
     def client_info(self) -> list[dict[str, Any]]:
-        result = []
+        connected: list[dict[str, Any]] = []
+        offline_db: list[dict[str, Any]] = []
+        discovered_only: list[dict[str, Any]] = []
+
+        # --- Tier 1: currently-connected WebSocket clients ---
+        connected_ids: set[str] = set()
         for client in self._server.clients.values():
+            connected_ids.add(client.client_id)
             eid = self.effective_endpoint_id(client.client_id)
             ep = self._endpoints.get(eid) if eid else None
-            channels = []
-            for ch in client.artwork_channels:
-                channels.append({
+            channels = [
+                {
                     "source": ch.source,
                     "format": ch.format,
                     "width": ch.media_width,
                     "height": ch.media_height,
-                })
-            result.append({
+                }
+                for ch in client.artwork_channels
+            ]
+            connected.append({
                 "id": client.client_id,
                 "name": client.name,
+                "status": "connected",
                 "roles": client.active_roles,
                 "stream_started": client.stream_started,
                 "artwork_channels": channels,
@@ -270,9 +329,85 @@ class EndpointRegistry:
                 "endpoint_name": ep.name if ep else None,
                 "explicit_assignment": self._assignments.get(client.client_id) is not None,
                 "dither_algo": self.client_dither_algo(client.client_id),
+                "dither_palette": self.client_dither_palette(client.client_id),
                 "interval": self.client_interval(client.client_id),
+                "discovered_url": None,
+                "discovered_only": False,
             })
-        return result
+
+        # --- Tier 2: mDNS-discovered URLs (may or may not have a known client_id) ---
+        # Build a set of client_ids that are visible via mDNS so we can avoid
+        # showing the same client twice in the DB-offline tier below.
+        mdns_client_ids: set[str] = set()
+        for entry in self._server.get_discovered_urls():
+            raw_url = entry["url"]
+            if raw_url is None:
+                continue  # malformed entry — guard clause
+            url: str = raw_url
+            known_client_id: str | None = entry["client_id"]
+
+            # Already connected — skip (tier 1 owns it).
+            if known_client_id is not None and known_client_id in connected_ids:
+                continue
+
+            # Use the real client_id as a stable id when we have it; fall back
+            # to the raw URL so the entry always has a unique, stable id.
+            entry_id = known_client_id if known_client_id is not None else url
+            if known_client_id is not None:
+                mdns_client_ids.add(known_client_id)
+
+            # A client that has ever explicitly connected (and thus has a DB
+            # assignment) is "offline but known", not purely discovered.
+            has_db_record = entry_id in self._assignments
+            eid = self.effective_endpoint_id(entry_id) if known_client_id else None
+            ep = self._endpoints.get(eid) if eid else None
+            entry_dict = {
+                "id": entry_id,
+                "name": entry_id,
+                "status": "discovered",
+                "roles": [],
+                "stream_started": False,
+                "artwork_channels": [],
+                "endpoint_id": eid,
+                "endpoint_name": ep.name if ep else None,
+                "explicit_assignment": self._assignments.get(entry_id) is not None,
+                "dither_algo": self.client_dither_algo(entry_id),
+                "dither_palette": self.client_dither_palette(entry_id),
+                "interval": self.client_interval(entry_id),
+                "discovered_url": url,
+                "discovered_only": not has_db_record,
+            }
+            if has_db_record:
+                offline_db.append(entry_dict)
+            else:
+                discovered_only.append(entry_dict)
+
+        # --- Tier 3: DB-only clients (had an assignment, not currently connected or in mDNS) ---
+        for db_client_id in self._assignments:
+            if db_client_id in connected_ids or db_client_id in mdns_client_ids:
+                continue  # already represented in tier 1 or 2
+            eid = self.effective_endpoint_id(db_client_id)
+            ep = self._endpoints.get(eid) if eid else None
+            # Surface the last-known URL so the UI can offer Force Connect
+            last_url: str | None = self._client_last_url.get(db_client_id)
+            offline_db.append({
+                "id": db_client_id,
+                "name": db_client_id,
+                "status": "disconnected",
+                "roles": [],
+                "stream_started": False,
+                "artwork_channels": [],
+                "endpoint_id": eid,
+                "endpoint_name": ep.name if ep else None,
+                "explicit_assignment": True,
+                "dither_algo": self.client_dither_algo(db_client_id),
+                "dither_palette": self.client_dither_palette(db_client_id),
+                "interval": self.client_interval(db_client_id),
+                "discovered_url": last_url,
+                "discovered_only": False,
+            })
+
+        return connected + offline_db + discovered_only
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -331,7 +466,11 @@ class EndpointRegistry:
                     )
                     results = await asyncio.gather(
                         *(
-                            _push(self._server, c, data, self.client_dither_algo(c.client_id))
+                            _push(
+                                self._server, c, data,
+                                self.client_dither_algo(c.client_id),
+                                self.client_dither_palette(c.client_id),
+                            )
                             for c in due_clients
                         ),
                         return_exceptions=True,
@@ -366,11 +505,13 @@ async def _push(
     client: Any,
     data: bytes,
     dither_algo: DitheringAlgo,
+    dither_palette: DitheringPalette = "e6",
 ) -> None:
     from sendspin_image_server.stream import push_image_to_client
-    force_dither = dither_algo != _NO_DITHER_SENTINEL
+    force_dither = dither_algo != _NO_DITHER_SENTINEL and dither_palette != "none"
     await push_image_to_client(
         client, data, 0,
         force_e6_dither=force_dither,
         dither_algo=dither_algo if force_dither else "none",
+        dither_palette=dither_palette if force_dither else "e6",
     )

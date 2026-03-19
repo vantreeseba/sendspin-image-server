@@ -50,10 +50,10 @@ export default function App() {
         {/* Clients */}
         <section className="space-y-3">
           <h2 className="font-semibold text-muted-foreground text-xs uppercase tracking-wider">
-            Connected Clients
+            Clients
           </h2>
           {!clients || clients.length === 0 ? (
-            <p className="text-muted-foreground text-sm">No clients connected.</p>
+            <p className="text-muted-foreground text-sm">No clients discovered.</p>
           ) : (
             <div className="grid gap-3 sm:grid-cols-2">
               {clients.map((c) => (

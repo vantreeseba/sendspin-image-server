@@ -10,7 +10,7 @@ import struct
 from PIL import Image
 
 from sendspin_image_server.client import ClientState, server_time_us
-from sendspin_image_server.dither import DitheringAlgo, encode_pil, floyd_steinberg_e6
+from sendspin_image_server.dither import DitheringAlgo, DitheringPalette, encode_pil, floyd_steinberg_e6
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +82,7 @@ async def push_image_to_client(
     *,
     force_e6_dither: bool = False,
     dither_algo: DitheringAlgo = "floyd-steinberg",
+    dither_palette: DitheringPalette = "e6",
 ) -> None:
     """Send an artwork binary message to a single client.
 
@@ -89,8 +90,8 @@ async def push_image_to_client(
     the client declared in client/hello (or updated via stream/request-format).
 
     If the client's artwork channel has format 'e6-dithered', or if
-    *force_e6_dither* is True, dithering to the six-color ACeP palette is
-    applied after resizing (always post-resize, never before).
+    *force_e6_dither* is True, dithering to the chosen palette is applied
+    after resizing (always post-resize, never before).
     """
     loop = asyncio.get_event_loop()
 
@@ -109,14 +110,14 @@ async def push_image_to_client(
         fmt_map = {"jpeg": "JPEG", "png": "PNG", "bmp": "BMP", "e6-dithered": "JPEG"}
         output_format = fmt_map.get(ch.format.lower(), "JPEG")
 
-        # Apply e6 dithering if requested by client or forced by caller
+        # Apply dithering if requested by client or forced by caller
         if ch.wants_e6_dither or force_e6_dither:
             logger.debug(
-                "Applying e6 dithering (%s) for client %s channel %d → %s",
-                dither_algo, client.client_id, channel, output_format,
+                "Applying dithering (algo=%s, palette=%s) for client %s channel %d → %s",
+                dither_algo, dither_palette, client.client_id, channel, output_format,
             )
             image_bytes = await loop.run_in_executor(
-                None, floyd_steinberg_e6, image_bytes, dither_algo, output_format
+                None, floyd_steinberg_e6, image_bytes, dither_algo, output_format, dither_palette
             )
         else:
             # Re-encode to the client's requested format even without dithering

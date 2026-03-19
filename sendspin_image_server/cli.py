@@ -12,7 +12,14 @@ import signal
 import uuid
 
 from sendspin_image_server.db import Database
-from sendspin_image_server.dither import DITHER_ALGOS, DitheringAlgo, E6_PALETTE_SET, dither_to_pil
+from sendspin_image_server.dither import (
+    DITHER_ALGOS,
+    DITHER_PALETTES,
+    DitheringAlgo,
+    DitheringPalette,
+    PALETTE_SETS,
+    dither_to_pil,
+)
 from sendspin_image_server.endpoints import HomeAssistantEndpoint, ImmichEndpoint, LocalFolderEndpoint
 from sendspin_image_server.mdns import MDNSAdvertiser, MDNSDiscovery
 from sendspin_image_server.registry import EndpointRegistry
@@ -20,6 +27,7 @@ from sendspin_image_server.server import SendspinImageServer
 from sendspin_image_server.stream import _resize_for_channel
 
 _VALID_DITHER_ALGOS = set(DITHER_ALGOS)
+_VALID_DITHER_PALETTES = set(DITHER_PALETTES)
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +44,7 @@ async def run(
     http_port: int,
     interval: float,
     dither_algo: DitheringAlgo,
+    dither_palette: DitheringPalette = "e6",
     data_dir: pathlib.Path | None = None,
 ) -> int:
     """Run the Sendspin image server and HTTP / REST endpoints."""
@@ -67,7 +76,7 @@ async def run(
     # ------------------------------------------------------------------
     # Endpoint registry
     # ------------------------------------------------------------------
-    registry = EndpointRegistry(server=server, interval=interval, dither_algo=dither_algo, db=db)
+    registry = EndpointRegistry(server=server, interval=interval, dither_algo=dither_algo, dither_palette=dither_palette, db=db)
 
     # Built-in local folder endpoint (always first / default, never persisted)
     builtin = LocalFolderEndpoint(
@@ -80,6 +89,10 @@ async def run(
     # Restore previously saved endpoints + assignments from DB
     await registry.restore_from_db(builtin_endpoint_id=_BUILTIN_LOCAL_ENDPOINT_ID)
 
+    # Give the server a back-reference to the registry so it can persist
+    # each client's last-known WebSocket URL on successful hello handshake.
+    server.registry = registry
+
     # ------------------------------------------------------------------
     # HTTP handlers
     # ------------------------------------------------------------------
@@ -91,9 +104,11 @@ async def run(
             return web.Response(status=400, text="Empty body")
         channel = int(request.query.get("channel", "0"))
         # Per-client dithering is handled by the registry feed loop.
-        # The manual /image push falls back to the server-wide default algo.
+        # The manual /image push falls back to the server-wide default algo + palette.
+        force_dither = dither_algo != "none" and dither_palette != "none"
         await server.broadcast_image(
-            data, channel=channel, force_e6_dither=dither_algo != "none", dither_algo=dither_algo
+            data, channel=channel, force_e6_dither=force_dither,
+            dither_algo=dither_algo, dither_palette=dither_palette,
         )
         logger.info("Pushed image (%d bytes) to artwork clients on channel %d", len(data), channel)
         return web.Response(status=200, text="OK")
@@ -116,15 +131,21 @@ async def run(
 
         resized = await loop.run_in_executor(None, _resize_for_channel, raw, width, height)
 
+        palette_set = PALETTE_SETS.get(dither_palette)
+
         def _dither_verify_encode(data: bytes) -> tuple[bytes, int, int]:
             import io as _io
-            pil_img = dither_to_pil(data, algo=dither_algo)
-            bad = sum(1 for px in pil_img.getdata() if px not in E6_PALETTE_SET)
+            pil_img = dither_to_pil(data, algo=dither_algo, palette=dither_palette)
+            if palette_set is not None:
+                bad = sum(1 for px in pil_img.getdata() if px not in palette_set)
+            else:
+                bad = 0
             png_buf = _io.BytesIO()
             pil_img.save(png_buf, format="PNG")
             return png_buf.getvalue(), bad, len(list(pil_img.getdata()))
 
-        if dither_algo != "none":
+        applying_dither = dither_algo != "none" and dither_palette != "none"
+        if applying_dither:
             png_bytes, bad_count, total = await loop.run_in_executor(
                 None, _dither_verify_encode, resized
             )
@@ -258,6 +279,22 @@ async def run(
         registry.set_client_dither(client_id, algo)  # type: ignore[arg-type]
         return web.Response(status=204)
 
+    async def api_set_client_palette(request: web.Request) -> web.Response:
+        """POST /api/clients/{id}/palette  body: {dither_palette}"""
+        client_id = request.match_info["id"]
+        try:
+            body = await request.json()
+        except Exception:
+            return web.Response(status=400, text="Invalid JSON")
+        palette = body.get("dither_palette", "").strip()
+        if palette not in _VALID_DITHER_PALETTES:
+            return web.Response(
+                status=400,
+                text=f"Invalid dither_palette {palette!r}. Choose from: {', '.join(sorted(_VALID_DITHER_PALETTES))}",
+            )
+        registry.set_client_palette(client_id, palette)  # type: ignore[arg-type]
+        return web.Response(status=204)
+
     async def api_set_client_interval(request: web.Request) -> web.Response:
         """POST /api/clients/{id}/interval  body: {interval}"""
         client_id = request.match_info["id"]
@@ -275,6 +312,32 @@ async def run(
         if interval < 0:
             return web.Response(status=400, text="'interval' must be >= 0 (0 = server default)")
         registry.set_client_interval(client_id, interval)
+        return web.Response(status=204)
+
+    async def api_connect_client(request: web.Request) -> web.Response:
+        """POST /api/clients/{id}/connect — force (re)connect to a discovered client."""
+        client_id = request.match_info["id"]
+        clients = registry.client_info()
+        entry = next((c for c in clients if c["id"] == client_id), None)
+        if entry is None:
+            return web.Response(status=404, text="Client not found")
+        discovered_url = entry.get("discovered_url")
+        if not discovered_url:
+            return web.Response(status=409, text="Client has no discovered URL (already connected or unknown)")
+        server.reconnect_to_client(discovered_url, connection_reason="playback")
+        return web.Response(status=204)
+
+    async def api_delete_client(request: web.Request) -> web.Response:
+        """DELETE /api/clients/{id} — forget a client entirely."""
+        client_id = request.match_info["id"]
+        clients = registry.client_info()
+        entry = next((c for c in clients if c["id"] == client_id), None)
+        if entry is None:
+            return web.Response(status=404, text="Client not found")
+        discovered_url = entry.get("discovered_url")
+        if discovered_url:
+            server.disconnect_from_client(discovered_url)
+        registry.delete_client(client_id)
         return web.Response(status=204)
 
     # ------------------------------------------------------------------
@@ -308,7 +371,10 @@ async def run(
     app.router.add_delete("/api/endpoints/{id}", api_delete_endpoint)
     app.router.add_post("/api/clients/{id}/endpoint", api_assign_client)
     app.router.add_post("/api/clients/{id}/dither", api_set_client_dither)
+    app.router.add_post("/api/clients/{id}/palette", api_set_client_palette)
     app.router.add_post("/api/clients/{id}/interval", api_set_client_interval)
+    app.router.add_post("/api/clients/{id}/connect", api_connect_client)
+    app.router.add_delete("/api/clients/{id}", api_delete_client)
 
     runner = web.AppRunner(app)
     await runner.setup()
@@ -316,7 +382,7 @@ async def run(
     await site.start()
 
     logger.info("HTTP endpoint: http://%s:%d/", host, http_port)
-    logger.info("Dithering algorithm: %s", dither_algo)
+    logger.info("Dithering algorithm: %s  palette: %s", dither_algo, dither_palette)
     logger.info("Server running. Press Ctrl+C to quit.")
 
     loop = asyncio.get_event_loop()
@@ -392,6 +458,12 @@ def main() -> None:
         choices=list(DITHER_ALGOS),
         help="Default dithering algorithm for clients without an explicit override",
     )
+    parser.add_argument(
+        "--dither-palette",
+        default="e6",
+        choices=list(DITHER_PALETTES),
+        help="Default dithering palette for clients without an explicit override (none=full color, bw=black&white, e6=6-color e-Paper)",
+    )
     _data_dir_default = os.environ.get("DATA_DIR")
     parser.add_argument(
         "--data-dir",
@@ -417,6 +489,7 @@ def main() -> None:
                 http_port=args.http_port,
                 interval=args.interval,
                 dither_algo=args.dither_algo,
+                dither_palette=args.dither_palette,
                 data_dir=args.data_dir,
             )
         )

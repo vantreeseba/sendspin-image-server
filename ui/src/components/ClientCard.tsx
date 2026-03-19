@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { assignClient, setClientDither, setClientInterval } from '@/api';
+import { assignClient, connectClient, deleteClient, setClientDither, setClientInterval, setClientPalette } from '@/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,8 +11,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import type { Client, DitheringAlgo, Endpoint } from '@/types';
-import { DITHERING_ALGOS } from '@/types';
+import type { Client, DitheringAlgo, DitheringPalette, Endpoint } from '@/types';
+import { DITHERING_ALGOS, DITHERING_PALETTES, PALETTE_LABELS } from '@/types';
 
 interface Props {
   client: Client;
@@ -36,13 +36,22 @@ const ALGO_OPTIONS: { value: DitheringAlgo; label: string }[] = [
   ...DITHERING_ALGOS.map((algo) => ({ value: algo, label: algo })),
 ];
 
+const PALETTE_OPTIONS: { value: DitheringPalette; label: string }[] = DITHERING_PALETTES.map(
+  (p) => ({ value: p, label: PALETTE_LABELS[p] }),
+);
+
 export function ClientCard({ client, endpoints, onChanged }: Props) {
+  const isDiscovered = client.discovered_only || client.status === 'discovered';
+
   const [selectedEndpoint, setSelectedEndpoint] = useState(client.endpoint_id ?? '');
   const [selectedAlgo, setSelectedAlgo] = useState<DitheringAlgo>(client.dither_algo);
+  const [selectedPalette, setSelectedPalette] = useState<DitheringPalette>(client.dither_palette);
   const [intervalInput, setIntervalInput] = useState(
     client.interval > 0 ? String(client.interval) : '',
   );
   const [busy, setBusy] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const ch = client.artwork_channels[0];
@@ -54,6 +63,7 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
   const isDirty =
     selectedEndpoint !== (client.endpoint_id ?? '') ||
     selectedAlgo !== client.dither_algo ||
+    selectedPalette !== client.dither_palette ||
     parsedInterval !== client.interval;
 
   async function handleUpdate() {
@@ -73,6 +83,10 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
         tasks.push(setClientDither(client.id, selectedAlgo));
       }
 
+      if (selectedPalette !== client.dither_palette) {
+        tasks.push(setClientPalette(client.id, selectedPalette));
+      }
+
       if (parsedInterval !== client.interval) {
         tasks.push(setClientInterval(client.id, parsedInterval));
       }
@@ -86,6 +100,32 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
     }
   }
 
+  async function handleConnect() {
+    setConnecting(true);
+    setErr(null);
+    try {
+      await connectClient(client.id);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setConnecting(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!confirm(`Forget client "${client.name || client.id}"?`)) return;
+    setDeleting(true);
+    setErr(null);
+    try {
+      await deleteClient(client.id);
+      onChanged();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   const providerLabel = client.endpoint_name
     ? client.explicit_assignment
       ? client.endpoint_name
@@ -95,21 +135,51 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
   const intervalLabel = client.interval > 0 ? `${client.interval}s` : 'default';
 
   return (
-    <Card>
+    <Card className={isDiscovered ? 'opacity-60' : undefined}>
       <CardHeader>
         <div className="flex items-center justify-between gap-2">
           <CardTitle className="truncate text-lg">{client.name || client.id}</CardTitle>
-          <Badge
-            variant="outline"
-            className="shrink-0 border-green-600 px-2 py-0.5 text-green-400 text-xs"
-          >
-            online
-          </Badge>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {client.status === 'connected' ? (
+              <Badge
+                variant="outline"
+                className="shrink-0 border-green-600 px-2 py-0.5 text-green-400 text-xs"
+              >
+                Online
+              </Badge>
+            ) : client.discovered_only ? (
+              <Badge
+                variant="outline"
+                className="shrink-0 border-amber-500 px-2 py-0.5 text-amber-400 text-xs"
+              >
+                Discovered
+              </Badge>
+            ) : (
+              <Badge
+                variant="outline"
+                className="shrink-0 border-red-600 px-2 py-0.5 text-red-400 text-xs"
+              >
+                Offline
+              </Badge>
+            )}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleDelete}
+              disabled={deleting}
+              className="shrink-0 text-xs border-red-800 text-red-400 hover:bg-red-900/20"
+            >
+              {deleting ? '…' : 'Forget'}
+            </Button>
+          </div>
         </div>
       </CardHeader>
 
       <CardContent className="space-y-1.5">
-        <Row label="MAC">{client.id}</Row>
+        <Row label="ID">{client.id}</Row>
+        {client.discovered_url && (
+          <Row label="URL">{client.discovered_url}</Row>
+        )}
         {ch && (
           <>
             <Row label="Resolution">
@@ -121,54 +191,92 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
         <Row label="Provider">{providerLabel}</Row>
         <Row label="Interval">{intervalLabel}</Row>
 
-        {/* Provider selector */}
-        <Select value={selectedEndpoint} onValueChange={setSelectedEndpoint}>
-          <SelectTrigger size="sm" className="w-full text-xs">
-            <SelectValue placeholder="Select image provider…" />
-          </SelectTrigger>
-          <SelectContent>
-            {endpoints.map((ep) => (
-              <SelectItem key={ep.id} value={ep.id} className="text-xs">
-                {ep.name}
-                <span className="ml-1 text-muted-foreground">({ep.kind})</span>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {/* Provider selector — hidden for discovered-only clients */}
+        {!isDiscovered && (
+          <Select value={selectedEndpoint} onValueChange={setSelectedEndpoint}>
+            <SelectTrigger size="sm" className="w-full text-xs">
+              <SelectValue placeholder="Select image provider…" />
+            </SelectTrigger>
+            <SelectContent>
+              {endpoints.map((ep) => (
+                <SelectItem key={ep.id} value={ep.id} className="text-xs">
+                  {ep.name}
+                  <span className="ml-1 text-muted-foreground">({ep.kind})</span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
 
-        {/* Dithering selector */}
-        <Select value={selectedAlgo} onValueChange={(v) => setSelectedAlgo(v as DitheringAlgo)}>
-          <SelectTrigger size="sm" className="w-full text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {ALGO_OPTIONS.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value} className="text-xs">
-                {opt.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {/* Palette selector — hidden for discovered-only clients */}
+        {!isDiscovered && (
+          <Select value={selectedPalette} onValueChange={(v) => setSelectedPalette(v as DitheringPalette)}>
+            <SelectTrigger size="sm" className="w-full text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PALETTE_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value} className="text-xs">
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
 
-        {/* Interval input */}
-        <Input
-          type="number"
-          min={0}
-          step={1}
-          placeholder="Interval in seconds (default: 120)"
-          value={intervalInput}
-          onChange={(e) => setIntervalInput(e.target.value)}
-          className={`h-8 text-xs ${!intervalValid ? 'border-destructive' : ''}`}
-        />
+        {/* Dithering algorithm selector — hidden for discovered-only clients */}
+        {!isDiscovered && (
+          <Select value={selectedAlgo} onValueChange={(v) => setSelectedAlgo(v as DitheringAlgo)}>
+            <SelectTrigger size="sm" className="w-full text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {ALGO_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value} className="text-xs">
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
 
-        <Button
-          size="sm"
-          onClick={handleUpdate}
-          disabled={busy || !isDirty || !intervalValid}
-          className="w-full text-xs"
-        >
-          Update
-        </Button>
+        {/* Interval input — hidden for discovered-only clients */}
+        {!isDiscovered && (
+          <Input
+            type="number"
+            min={0}
+            step={1}
+            placeholder="Interval in seconds (default: 120)"
+            value={intervalInput}
+            onChange={(e) => setIntervalInput(e.target.value)}
+            className={`h-8 text-xs ${!intervalValid ? 'border-destructive' : ''}`}
+          />
+        )}
+
+        {/* Update button — only for connected clients */}
+        {!isDiscovered && (
+          <Button
+            size="sm"
+            onClick={handleUpdate}
+            disabled={busy || !isDirty || !intervalValid}
+            className="w-full text-xs"
+          >
+            Update
+          </Button>
+        )}
+
+        {/* Force Connect — for discovered-only clients and disconnected (offline) clients */}
+        {(isDiscovered || client.status === 'disconnected') && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleConnect}
+            disabled={connecting}
+            className="w-full text-xs mt-2"
+          >
+            {connecting ? 'Connecting…' : 'Force Connect'}
+          </Button>
+        )}
 
         {err && <p className="text-destructive text-xs">{err}</p>}
       </CardContent>

@@ -1,4 +1,4 @@
-import type { Client, DitheringAlgo, Endpoint } from './types';
+import type { Client, DitheringAlgo, DitheringPalette, Endpoint } from './types';
 
 const BASE = '';
 
@@ -51,8 +51,33 @@ export async function setClientDither(clientId: string, algo: DitheringAlgo): Pr
   }
 }
 
+export async function setClientPalette(clientId: string, palette: DitheringPalette): Promise<void> {
+  const r = await fetch(`${BASE}/api/clients/${encodeURIComponent(clientId)}/palette`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dither_palette: palette }),
+  });
+  if (!r.ok) {
+    throw new Error(await r.text());
+  }
+}
+
+export async function connectClient(clientId: string): Promise<void> {
+  const r = await fetch(`${BASE}/api/clients/${encodeURIComponent(clientId)}/connect`, {
+    method: 'POST',
+  });
+  if (!r.ok) throw new Error(await r.text());
+}
+
 export async function deleteEndpoint(id: string): Promise<void> {
   const r = await fetch(`${BASE}/api/endpoints/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (!r.ok) {
+    throw new Error(await r.text());
+  }
+}
+
+export async function deleteClient(clientId: string): Promise<void> {
+  const r = await fetch(`${BASE}/api/clients/${encodeURIComponent(clientId)}`, { method: 'DELETE' });
   if (!r.ok) {
     throw new Error(await r.text());
   }
