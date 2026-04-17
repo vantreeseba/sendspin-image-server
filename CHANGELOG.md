@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v1.3.1 (2026-03-19)
+
+### Bug Fixes
+
+- Apply EXIF orientation correction to Immich images
+  ([`b264805`](https://github.com/vantreeseba/sendspin-image-server/commit/b26480568a4965f8888dd10b89d7a875b3aad43b))
+
+### Documentation
+
+- Rewrite README for end users, add TECHNICAL.md for developers
+  ([`c14a953`](https://github.com/vantreeseba/sendspin-image-server/commit/c14a953345f5c46dd5c8077e06450261dc75b8c6))
+
+
 ## v1.3.0 (2026-03-19)
 
 ### Features
