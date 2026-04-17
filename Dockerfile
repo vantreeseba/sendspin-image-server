@@ -1,13 +1,17 @@
-# ── Stage 1: build the React UI ──────────────────────────────────────────────
-FROM node:24-slim AS ui-builder
+# ── Stage 1: use pre-built React UI ──────────────────────────────────────────────
+FROM node:24-slim AS ui-prebuilt
 
 WORKDIR /ui
 
-COPY ui/package*.json ./
-RUN npm ci
+# Use pre-built dist (build locally first with: cd ui && npm run build)
+COPY ui/dist/ ./dist/
 
-COPY ui/ ./
-RUN npm run build
+# Copy package files for reference only
+COPY ui/package*.json ./
+
+# Note: For development, uncomment below and comment out COPY ui/dist/ above
+# COPY ui/ ./
+# RUN npm run build
 # Output is in /ui/dist/
 
 # ── Stage 2: Python server ────────────────────────────────────────────────────
@@ -28,7 +32,7 @@ RUN uv pip install --system "websockets>=12.0" "zeroconf>=0.131.0" "aiohttp>=3.9
 COPY sendspin_image_server/ ./sendspin_image_server/
 
 # Copy the built UI into the package directory where cli.py expects it
-COPY --from=ui-builder /ui/dist/ ./sendspin_image_server/ui_dist/
+COPY --from=ui-prebuilt /ui/dist/ ./sendspin_image_server/ui_dist/
 
 # Create empty images directory — mount your own images here at runtime:
 # docker run -v /host/photos:/app/images ...

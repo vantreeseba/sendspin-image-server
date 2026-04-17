@@ -4,25 +4,31 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
 import logging
 import os
 import pathlib
 import signal
 import uuid
+from typing import Any
 
 from sendspin_image_server.db import Database
 from sendspin_image_server.dither import (
     DITHER_ALGOS,
     DITHER_PALETTES,
+    PALETTE_SETS,
     DitheringAlgo,
     DitheringPalette,
-    PALETTE_SETS,
     dither_to_pil,
 )
-from sendspin_image_server.endpoints import HomeAssistantEndpoint, ImmichEndpoint, LocalFolderEndpoint
+from sendspin_image_server.endpoints import (
+    HomeAssistantEndpoint,
+    ImmichEndpoint,
+    LocalFolderEndpoint,
+)
 from sendspin_image_server.mdns import MDNSAdvertiser, MDNSDiscovery
-from sendspin_image_server.registry import EndpointRegistry
+from sendspin_image_server.registry import DevicePreset, EndpointRegistry
 from sendspin_image_server.server import SendspinImageServer
 from sendspin_image_server.stream import _resize_for_channel
 
@@ -76,7 +82,13 @@ async def run(
     # ------------------------------------------------------------------
     # Endpoint registry
     # ------------------------------------------------------------------
-    registry = EndpointRegistry(server=server, interval=interval, dither_algo=dither_algo, dither_palette=dither_palette, db=db)
+    registry = EndpointRegistry(
+        server=server,
+        interval=interval,
+        dither_algo=dither_algo,
+        dither_palette=dither_palette,
+        db=db,
+    )
 
     # Built-in local folder endpoint (always first / default, never persisted)
     builtin = LocalFolderEndpoint(
@@ -107,8 +119,11 @@ async def run(
         # The manual /image push falls back to the server-wide default algo + palette.
         force_dither = dither_algo != "none" and dither_palette != "none"
         await server.broadcast_image(
-            data, channel=channel, force_e6_dither=force_dither,
-            dither_algo=dither_algo, dither_palette=dither_palette,
+            data,
+            channel=channel,
+            force_e6_dither=force_dither,
+            dither_algo=dither_algo,
+            dither_palette=dither_palette,
         )
         logger.info("Pushed image (%d bytes) to artwork clients on channel %d", len(data), channel)
         return web.Response(status=200, text="OK")
@@ -135,6 +150,7 @@ async def run(
 
         def _dither_verify_encode(data: bytes) -> tuple[bytes, int, int]:
             import io as _io
+
             pil_img = dither_to_pil(data, algo=dither_algo, palette=dither_palette)
             if palette_set is not None:
                 bad = sum(1 for px in pil_img.getdata() if px not in palette_set)
@@ -152,13 +168,16 @@ async def run(
             if bad_count:
                 logger.warning(
                     "Debug image palette check FAILED — %d/%d off-palette pixel(s)",
-                    bad_count, total,
+                    bad_count,
+                    total,
                 )
             else:
                 logger.info("Debug image palette check passed — all %d pixels on palette", total)
         else:
             import io as _io
+
             from PIL import Image as _PILImage
+
             pil_img = _PILImage.open(_io.BytesIO(resized)).convert("RGB")
             png_buf = _io.BytesIO()
             pil_img.save(png_buf, format="PNG")
@@ -166,7 +185,9 @@ async def run(
 
         out_path = pathlib.Path("/tmp/debug_current.png")
         out_path.write_bytes(png_bytes)
-        logger.info("Debug image saved to %s (%d bytes, %dx%d)", out_path, len(png_bytes), width, height)
+        logger.info(
+            "Debug image saved to %s (%d bytes, %dx%d)", out_path, len(png_bytes), width, height
+        )
         return web.Response(body=png_bytes, content_type="image/png")
 
     # ------------------------------------------------------------------
@@ -174,14 +195,14 @@ async def run(
     # ------------------------------------------------------------------
 
     async def api_get_clients(request: web.Request) -> web.Response:
-        """GET /api/clients"""
+        """GET /api/clients."""
         return web.Response(
             content_type="application/json",
             text=json.dumps(registry.client_info()),
         )
 
     async def api_get_endpoints(request: web.Request) -> web.Response:
-        """GET /api/endpoints"""
+        """GET /api/endpoints."""
         data = []
         for ep in registry.list_endpoints():
             d = ep.to_dict()
@@ -191,7 +212,7 @@ async def run(
         return web.Response(content_type="application/json", text=json.dumps(data))
 
     async def api_add_endpoint(request: web.Request) -> web.Response:
-        """POST /api/endpoints  body: {kind, name, ...}"""
+        """POST /api/endpoints  body: {kind, name, ...}."""
         try:
             body = await request.json()
         except Exception:
@@ -215,14 +236,19 @@ async def run(
             album_id = body.get("album_id", "").strip()
             api_key = body.get("api_key", "").strip()
             if not (base_url and album_id and api_key):
-                return web.Response(status=400, text="'base_url', 'album_id', 'api_key' are required for kind=immich")
+                return web.Response(
+                    status=400,
+                    text="'base_url', 'album_id', 'api_key' are required for kind=immich",
+                )
             ep = ImmichEndpoint(name=ep_name, base_url=base_url, album_id=album_id, api_key=api_key)
         elif kind == "homeassistant":
             base_url = body.get("base_url", "").strip()
             token = body.get("token", "").strip()
             media_content_id = body.get("media_content_id", "media-source://media_source").strip()
             if not (base_url and token):
-                return web.Response(status=400, text="'base_url' and 'token' are required for kind=homeassistant")
+                return web.Response(
+                    status=400, text="'base_url' and 'token' are required for kind=homeassistant"
+                )
             ep = HomeAssistantEndpoint(
                 name=ep_name,
                 base_url=base_url,
@@ -230,7 +256,10 @@ async def run(
                 media_content_id=media_content_id,
             )
         else:
-            return web.Response(status=400, text=f"Unknown kind: {kind!r}. Must be 'local', 'immich', or 'homeassistant'")
+            return web.Response(
+                status=400,
+                text=f"Unknown kind: {kind!r}. Must be 'local', 'immich', or 'homeassistant'",
+            )
 
         registry.add_endpoint(ep)
         d = ep.to_dict()
@@ -239,7 +268,7 @@ async def run(
         return web.Response(status=201, content_type="application/json", text=json.dumps(d))
 
     async def api_delete_endpoint(request: web.Request) -> web.Response:
-        """DELETE /api/endpoints/{id}"""
+        """DELETE /api/endpoints/{id}."""
         endpoint_id = request.match_info["id"]
         if endpoint_id == _BUILTIN_LOCAL_ENDPOINT_ID:
             return web.Response(status=403, text="Cannot delete built-in endpoint")
@@ -248,8 +277,120 @@ async def run(
             return web.Response(status=404, text=f"Endpoint {endpoint_id!r} not found")
         return web.Response(status=204)
 
+    async def api_get_device_presets(request: web.Request) -> web.Response:
+        """GET /api/device-presets."""
+        data = []
+        for preset in registry.list_device_presets():
+            data.append(preset.to_dict())
+        return web.Response(content_type="application/json", text=json.dumps(data))
+
+    async def api_add_device_preset(request: web.Request) -> web.Response:
+        """POST /api/device-presets  body: {name, dither_algo, dither_palette, interval}."""
+        try:
+            body = await request.json()
+        except Exception:
+            return web.Response(status=400, text="Invalid JSON")
+
+        name = body.get("name", "").strip()
+        if not name:
+            return web.Response(status=400, text="'name' is required")
+
+        dither_algo = body.get("dither_algo", "none").strip()
+        if dither_algo not in _VALID_DITHER_ALGOS:
+            return web.Response(
+                status=400,
+                text=f"Invalid dither_algo {dither_algo!r}. Choose from: {', '.join(sorted(_VALID_DITHER_ALGOS))}",
+            )
+        dither_palette = body.get("dither_palette", "e6").strip()
+        if dither_palette not in _VALID_DITHER_PALETTES:
+            return web.Response(
+                status=400,
+                text=f"Invalid dither_palette {dither_palette!r}. Choose from: {', '.join(sorted(_VALID_DITHER_PALETTES))}",
+            )
+        raw_interval = body.get("interval")
+        if raw_interval is None:
+            interval = 0
+        else:
+            try:
+                interval = float(raw_interval)
+            except (TypeError, ValueError):
+                return web.Response(status=400, text="'interval' must be a number")
+        if interval < 0:
+            return web.Response(status=400, text="'interval' must be >= 0")
+
+        preset = DevicePreset(
+            preset_id=uuid.uuid4().hex,
+            name=name,
+            dither_algo=dither_algo,
+            dither_palette=dither_palette,
+            interval=interval,
+        )
+        registry.add_device_preset(preset)
+        return web.Response(
+            status=201, content_type="application/json", text=json.dumps(preset.to_dict())
+        )
+
+    async def api_delete_device_preset(request: web.Request) -> web.Response:
+        """DELETE /api/device-presets/{id}."""
+        preset_id = request.match_info["id"]
+        removed = registry.remove_device_preset(preset_id)
+        if not removed:
+            return web.Response(status=404, text=f"Preset {preset_id!r} not found")
+        return web.Response(status=204)
+
+    async def api_update_device_preset(request: web.Request) -> web.Response:
+        """PUT /api/device-presets/{id}  body: {name, dither_algo, dither_palette, interval}."""
+        preset_id = request.match_info["id"]
+        preset = registry.get_device_preset(preset_id)
+        if preset is None:
+            return web.Response(status=404, text=f"Preset {preset_id!r} not found")
+
+        try:
+            body = await request.json()
+        except Exception:
+            return web.Response(status=400, text="Invalid JSON")
+
+        kwargs: dict[str, Any] = {}
+        if "name" in body:
+            name = body["name"]
+            if not name or not str(name).strip():
+                return web.Response(status=400, text="'name' is required")
+            kwargs["name"] = str(name).strip()
+        if "dither_algo" in body:
+            algo = body["dither_algo"]
+            if algo not in _VALID_DITHER_ALGOS:
+                return web.Response(
+                    status=400,
+                    text=f"Invalid dither_algo {algo!r}. Choose from: {', '.join(sorted(_VALID_DITHER_ALGOS))}",
+                )
+            kwargs["dither_algo"] = algo
+        if "dither_palette" in body:
+            palette = body["dither_palette"]
+            if palette not in _VALID_DITHER_PALETTES:
+                return web.Response(
+                    status=400,
+                    text=f"Invalid dither_palette {palette!r}. Choose from: {', '.join(sorted(_VALID_DITHER_PALETTES))}",
+                )
+            kwargs["dither_palette"] = palette
+        if "interval" in body:
+            raw_interval = body["interval"]
+            if raw_interval is None:
+                return web.Response(status=400, text="'interval' must be >= 0")
+            try:
+                interval = float(raw_interval)
+            except (TypeError, ValueError):
+                return web.Response(status=400, text="'interval' must be a number")
+            if interval < 0:
+                return web.Response(status=400, text="'interval' must be >= 0")
+            kwargs["interval"] = interval
+
+        registry.update_device_preset(preset_id, **kwargs)
+        return web.Response(
+            status=200, content_type="application/json", text=json.dumps(preset.to_dict())
+        )
+
     async def api_assign_client(request: web.Request) -> web.Response:
-        """POST /api/clients/{id}/endpoint  body: {endpoint_id}"""
+        """POST /api/clients/{id}/endpoint  body: {endpoint_id, [preset_id]}."""
         client_id = request.match_info["id"]
         try:
             body = await request.json()
@@ -258,13 +399,36 @@ async def run(
         endpoint_id = body.get("endpoint_id", "").strip()
         if not endpoint_id:
             return web.Response(status=400, text="'endpoint_id' is required")
-        ok = registry.assign(client_id, endpoint_id)
+        preset_id = body.get("preset_id")
+        if preset_id is not None:
+            preset_id = str(preset_id).strip()
+            if preset_id == "":
+                preset_id = None
+        ok = registry.assign(client_id, endpoint_id, preset_id=preset_id)
         if not ok:
             return web.Response(status=404, text=f"Endpoint {endpoint_id!r} not found")
         return web.Response(status=204)
 
+    async def api_assign_preset_to_client(request: web.Request) -> web.Response:
+        """POST /api/clients/{id}/preset  body: {preset_id}."""
+        client_id = request.match_info["id"]
+        try:
+            body = await request.json()
+        except Exception:
+            return web.Response(status=400, text="Invalid JSON")
+        preset_id = body.get("preset_id")
+        if preset_id is not None:
+            preset_id = str(preset_id).strip()
+            if preset_id == "":
+                preset_id = None
+        try:
+            registry.assign_preset_to_client(client_id, preset_id)
+        except ValueError as e:
+            return web.Response(status=404, text=str(e))
+        return web.Response(status=204)
+
     async def api_set_client_dither(request: web.Request) -> web.Response:
-        """POST /api/clients/{id}/dither  body: {dither_algo}"""
+        """POST /api/clients/{id}/dither  body: {dither_algo}."""
         client_id = request.match_info["id"]
         try:
             body = await request.json()
@@ -280,7 +444,7 @@ async def run(
         return web.Response(status=204)
 
     async def api_set_client_palette(request: web.Request) -> web.Response:
-        """POST /api/clients/{id}/palette  body: {dither_palette}"""
+        """POST /api/clients/{id}/palette  body: {dither_palette}."""
         client_id = request.match_info["id"]
         try:
             body = await request.json()
@@ -296,7 +460,7 @@ async def run(
         return web.Response(status=204)
 
     async def api_set_client_interval(request: web.Request) -> web.Response:
-        """POST /api/clients/{id}/interval  body: {interval}"""
+        """POST /api/clients/{id}/interval  body: {interval}."""
         client_id = request.match_info["id"]
         try:
             body = await request.json()
@@ -323,7 +487,9 @@ async def run(
             return web.Response(status=404, text="Client not found")
         discovered_url = entry.get("discovered_url")
         if not discovered_url:
-            return web.Response(status=409, text="Client has no discovered URL (already connected or unknown)")
+            return web.Response(
+                status=409, text="Client has no discovered URL (already connected or unknown)"
+            )
         server.reconnect_to_client(discovered_url, connection_reason="playback")
         return web.Response(status=204)
 
@@ -369,7 +535,12 @@ async def run(
     app.router.add_get("/api/endpoints", api_get_endpoints)
     app.router.add_post("/api/endpoints", api_add_endpoint)
     app.router.add_delete("/api/endpoints/{id}", api_delete_endpoint)
+    app.router.add_get("/api/device-presets", api_get_device_presets)
+    app.router.add_post("/api/device-presets", api_add_device_preset)
+    app.router.add_delete("/api/device-presets/{id}", api_delete_device_preset)
+    app.router.add_put("/api/device-presets/{id}", api_update_device_preset)
     app.router.add_post("/api/clients/{id}/endpoint", api_assign_client)
+    app.router.add_post("/api/clients/{id}/preset", api_assign_preset_to_client)
     app.router.add_post("/api/clients/{id}/dither", api_set_client_dither)
     app.router.add_post("/api/clients/{id}/palette", api_set_client_palette)
     app.router.add_post("/api/clients/{id}/interval", api_set_client_interval)
@@ -401,10 +572,8 @@ async def run(
     if with_signal:
         await stop_event.wait()
     else:
-        try:
+        with contextlib.suppress(KeyboardInterrupt, asyncio.CancelledError):
             await asyncio.Event().wait()
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            pass
 
     logger.info("Shutting down...")
     registry.stop_all()

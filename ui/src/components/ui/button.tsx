@@ -59,4 +59,5 @@ function Button({
   );
 }
 
-export { Button, buttonVariants };
+export { Button };
+export type { VariantProps as ButtonVariantProps } from 'class-variance-authority';

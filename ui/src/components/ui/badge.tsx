@@ -45,4 +45,5 @@ function Badge({
   )
 }
 
-export { Badge, badgeVariants }
+export { Badge }
+export type { VariantProps as BadgeVariantProps } from "class-variance-authority"

@@ -11,12 +11,20 @@ endpoints
     name        TEXT NOT NULL
     config_json TEXT NOT NULL      -- kind-specific fields as JSON
 
+device_presets
+    id             TEXT PRIMARY KEY   -- UUID
+    name           TEXT NOT NULL
+    dither_algo    TEXT NOT NULL DEFAULT 'none'
+    dither_palette TEXT NOT NULL DEFAULT 'e6'
+    interval       REAL NOT NULL DEFAULT 0
+
 assignments
     client_id      TEXT PRIMARY KEY
     endpoint_id    TEXT NOT NULL
+    preset_id      TEXT                -- optional reference to device_presets.id
     dither_algo    TEXT NOT NULL DEFAULT 'none'
     dither_palette TEXT NOT NULL DEFAULT 'e6'
-    interval       REAL NOT NULL DEFAULT 0  -- 0 means use server default
+    interval       REAL NOT NULL DEFAULT 0  -- 0 = server default
 
 clients
     client_id       TEXT PRIMARY KEY
@@ -43,9 +51,18 @@ CREATE TABLE IF NOT EXISTS endpoints (
     config_json TEXT NOT NULL DEFAULT '{}'
 );
 
+CREATE TABLE IF NOT EXISTS device_presets (
+    id             TEXT PRIMARY KEY,
+    name           TEXT NOT NULL,
+    dither_algo    TEXT NOT NULL DEFAULT 'none',
+    dither_palette TEXT NOT NULL DEFAULT 'e6',
+    interval       REAL NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS assignments (
     client_id      TEXT PRIMARY KEY,
     endpoint_id    TEXT NOT NULL,
+    preset_id      TEXT,
     dither_algo    TEXT NOT NULL DEFAULT 'none',
     dither_palette TEXT NOT NULL DEFAULT 'e6',
     interval       REAL NOT NULL DEFAULT 0
@@ -62,9 +79,9 @@ CREATE TABLE IF NOT EXISTS clients (
 _MIGRATION_ADD_PALETTE = (
     "ALTER TABLE assignments ADD COLUMN dither_palette TEXT NOT NULL DEFAULT 'e6'"
 )
-_MIGRATION_ADD_LAST_KNOWN_URL = (
-    "ALTER TABLE clients ADD COLUMN last_known_url TEXT"
-)
+_MIGRATION_ADD_LAST_KNOWN_URL = "ALTER TABLE clients ADD COLUMN last_known_url TEXT"
+_MIGRATION_ADD_PRESET_ID = "ALTER TABLE assignments ADD COLUMN preset_id TEXT"
+
 
 class Database:
     """Async SQLite wrapper for endpoint + assignment persistence."""
@@ -80,7 +97,11 @@ class Database:
         await self._db.executescript(_SCHEMA)
         await self._db.commit()
         # Run migrations that may already exist on older DBs (swallow duplicate-column errors)
-        for migration in (_MIGRATION_ADD_PALETTE, _MIGRATION_ADD_LAST_KNOWN_URL):
+        for migration in (
+            _MIGRATION_ADD_PALETTE,
+            _MIGRATION_ADD_LAST_KNOWN_URL,
+            _MIGRATION_ADD_PRESET_ID,
+        ):
             try:
                 await self._db.execute(migration)
                 await self._db.commit()
@@ -97,7 +118,9 @@ class Database:
     # Endpoints
     # ------------------------------------------------------------------
 
-    async def save_endpoint(self, endpoint_id: str, kind: str, name: str, config: dict[str, Any]) -> None:
+    async def save_endpoint(
+        self, endpoint_id: str, kind: str, name: str, config: dict[str, Any]
+    ) -> None:
         assert self._db is not None
         await self._db.execute(
             """
@@ -125,12 +148,14 @@ class Database:
                 config = json.loads(row["config_json"])
             except Exception:
                 config = {}
-            result.append({
-                "id": row["id"],
-                "kind": row["kind"],
-                "name": row["name"],
-                "config": config,
-            })
+            result.append(
+                {
+                    "id": row["id"],
+                    "kind": row["kind"],
+                    "name": row["name"],
+                    "config": config,
+                }
+            )
         return result
 
     # ------------------------------------------------------------------
@@ -144,19 +169,21 @@ class Database:
         dither_algo: str = "none",
         dither_palette: str = "e6",
         interval: float = 0,
+        preset_id: str | None = None,
     ) -> None:
         assert self._db is not None
         await self._db.execute(
             """
-            INSERT INTO assignments (client_id, endpoint_id, dither_algo, dither_palette, interval)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO assignments (client_id, endpoint_id, preset_id, dither_algo, dither_palette, interval)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(client_id) DO UPDATE SET
                 endpoint_id=excluded.endpoint_id,
+                preset_id=excluded.preset_id,
                 dither_algo=excluded.dither_algo,
                 dither_palette=excluded.dither_palette,
                 interval=excluded.interval
             """,
-            (client_id, endpoint_id, dither_algo, dither_palette, interval),
+            (client_id, endpoint_id, preset_id, dither_algo, dither_palette, interval),
         )
         await self._db.commit()
 
@@ -166,21 +193,103 @@ class Database:
         await self._db.commit()
 
     async def load_assignments(self) -> dict[str, dict[str, Any]]:
-        """Return {client_id: {endpoint_id, dither_algo, dither_palette, interval}} for all persisted assignments."""
+        """Return {client_id: {endpoint_id, preset_id, dither_algo, dither_palette, interval}} for all persisted assignments."""
         assert self._db is not None
         async with self._db.execute(
-            "SELECT client_id, endpoint_id, dither_algo, dither_palette, interval FROM assignments"
+            "SELECT client_id, endpoint_id, preset_id, dither_algo, dither_palette, interval FROM assignments"
         ) as cur:
             rows = await cur.fetchall()
         return {
             row["client_id"]: {
                 "endpoint_id": row["endpoint_id"],
+                "preset_id": row["preset_id"],
                 "dither_algo": row["dither_algo"],
                 "dither_palette": row["dither_palette"],
                 "interval": float(row["interval"]),
             }
             for row in rows
         }
+
+    # ------------------------------------------------------------------
+    # Device Presets
+    # ------------------------------------------------------------------
+
+    async def save_device_preset(
+        self,
+        preset_id: str,
+        name: str,
+        dither_algo: str = "none",
+        dither_palette: str = "e6",
+        interval: float = 0,
+    ) -> None:
+        assert self._db is not None
+        await self._db.execute(
+            """
+            INSERT INTO device_presets (id, name, dither_algo, dither_palette, interval)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                name=excluded.name,
+                dither_algo=excluded.dither_algo,
+                dither_palette=excluded.dither_palette,
+                interval=excluded.interval
+            """,
+            (preset_id, name, dither_algo, dither_palette, interval),
+        )
+        await self._db.commit()
+
+    async def delete_device_preset(self, preset_id: str) -> None:
+        assert self._db is not None
+        await self._db.execute("DELETE FROM device_presets WHERE id = ?", (preset_id,))
+        await self._db.commit()
+
+    async def load_device_presets(self) -> list[dict[str, Any]]:
+        """Return all persisted device presets as dicts."""
+        assert self._db is not None
+        async with self._db.execute(
+            "SELECT id, name, dither_algo, dither_palette, interval FROM device_presets"
+        ) as cur:
+            rows = await cur.fetchall()
+        return [
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "dither_algo": row["dither_algo"],
+                "dither_palette": row["dither_palette"],
+                "interval": float(row["interval"]),
+            }
+            for row in rows
+        ]
+
+    async def get_device_preset(self, preset_id: str) -> dict[str, Any] | None:
+        """Return a single device preset by id, or None if not found."""
+        assert self._db is not None
+        async with self._db.execute(
+            "SELECT id, name, dither_algo, dither_palette, interval FROM device_presets WHERE id = ?",
+            (preset_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "dither_algo": row["dither_algo"],
+            "dither_palette": row["dither_palette"],
+            "interval": float(row["interval"]),
+        }
+
+    async def update_preset_assignment(self, client_id: str, preset_id: str | None) -> None:
+        """Assign or unassign a preset for a client (keeps per-client overrides)."""
+        assert self._db is not None
+        await self._db.execute(
+            """
+            INSERT INTO assignments (client_id, endpoint_id, preset_id, dither_algo, dither_palette, interval)
+            VALUES (?, NULL, ?, 'none', 'e6', 0)
+            ON CONFLICT(client_id) DO UPDATE SET preset_id=excluded.preset_id
+            """,
+            (client_id, preset_id),
+        )
+        await self._db.commit()
 
     # ------------------------------------------------------------------
     # Clients (last-known URL)
@@ -204,9 +313,7 @@ class Database:
     async def load_client_urls(self) -> dict[str, dict[str, str | None]]:
         """Return {client_id: {name, last_known_url}} for all persisted clients."""
         assert self._db is not None
-        async with self._db.execute(
-            "SELECT client_id, name, last_known_url FROM clients"
-        ) as cur:
+        async with self._db.execute("SELECT client_id, name, last_known_url FROM clients") as cur:
             rows = await cur.fetchall()
         return {
             row["client_id"]: {

@@ -20,6 +20,34 @@ _NO_DITHER_SENTINEL: DitheringAlgo = "none"
 _DEFAULT_PALETTE: DitheringPalette = "e6"
 
 
+class DevicePreset:
+    """A reusable configuration preset for device settings."""
+
+    def __init__(
+        self,
+        preset_id: str,
+        name: str,
+        dither_algo: DitheringAlgo = "none",
+        dither_palette: DitheringPalette = "e6",
+        interval: float = 0,
+    ) -> None:
+        self.preset_id = preset_id
+        self.name = name
+        self.dither_algo = dither_algo
+        self.dither_palette = dither_palette
+        self.interval = interval
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise to a JSON-safe dict for the REST API."""
+        return {
+            "id": self.preset_id,
+            "name": self.name,
+            "dither_algo": self.dither_algo,
+            "dither_palette": self.dither_palette,
+            "interval": self.interval,
+        }
+
+
 class EndpointRegistry:
     """Manages endpoints, client assignments, and per-endpoint feed loops."""
 
@@ -38,7 +66,9 @@ class EndpointRegistry:
         self._db = db
 
         self._endpoints: dict[str, ImageEndpoint] = {}
-        self._assignments: dict[str, str | None] = {}
+        self._device_presets: dict[str, DevicePreset] = {}
+        self._assignments: dict[str, str | None] = {}  # client_id -> endpoint_id
+        self._preset_assignments: dict[str, str | None] = {}  # client_id -> preset_id
         self._client_dither: dict[str, DitheringAlgo] = {}  # per-client override
         self._client_palette: dict[str, DitheringPalette] = {}  # per-client palette override
         self._client_interval: dict[str, float] = {}  # per-client override; 0 = use server default
@@ -62,8 +92,13 @@ class EndpointRegistry:
                 self._client_last_url[client_id] = url
                 logger.debug("Restored last-known URL for client %s: %s", client_id, url)
 
-        from sendspin_image_server.endpoints import HomeAssistantEndpoint, ImmichEndpoint, LocalFolderEndpoint
         import pathlib
+
+        from sendspin_image_server.endpoints import (
+            HomeAssistantEndpoint,
+            ImmichEndpoint,
+            LocalFolderEndpoint,
+        )
 
         rows = await self._db.load_endpoints()
         for row in rows:
@@ -105,26 +140,62 @@ class EndpointRegistry:
             except Exception:
                 logger.exception("Failed to restore endpoint id=%s", eid)
 
+        presets = await self._db.load_device_presets()
+        for preset_data in presets:
+            pid = preset_data["id"]
+            if pid in self._device_presets:
+                continue  # already loaded (shouldn't happen but be safe)
+            preset = DevicePreset(
+                preset_id=pid,
+                name=preset_data["name"],
+                dither_algo=preset_data["dither_algo"],
+                dither_palette=preset_data["dither_palette"],
+                interval=preset_data["interval"],
+            )
+            self._device_presets[pid] = preset
+            logger.info("Restored device preset from DB: %s id=%s", preset.name, pid)
+
         assignments = await self._db.load_assignments()
         for client_id, row in assignments.items():
             endpoint_id = row["endpoint_id"]
+            preset_id = row.get("preset_id")
             dither_algo = row.get("dither_algo", self._dither_algo)
             dither_palette = row.get("dither_palette", self._dither_palette)
             interval = float(row.get("interval", 0))
-            if endpoint_id in self._endpoints:
+            if preset_id:
+                # Restore preset assignment
+                if preset_id in self._device_presets:
+                    self._preset_assignments[client_id] = preset_id
+                    logger.info(
+                        "Restored preset assignment: client %s → preset %s",
+                        client_id,
+                        preset_id,
+                    )
+                else:
+                    logger.warning(
+                        "Skipping stale preset assignment: client %s → preset %s (preset not loaded)",
+                        client_id,
+                        preset_id,
+                    )
+            elif endpoint_id in self._endpoints:
+                # Legacy assignment without preset
                 self._assignments[client_id] = endpoint_id
                 self._client_dither[client_id] = dither_algo  # type: ignore[assignment]
                 self._client_palette[client_id] = dither_palette  # type: ignore[assignment]
                 self._client_interval[client_id] = interval
                 logger.info(
                     "Restored assignment: client %s → endpoint %s (dither=%s, palette=%s, interval=%ss)",
-                    client_id, endpoint_id, dither_algo, dither_palette,
+                    client_id,
+                    endpoint_id,
+                    dither_algo,
+                    dither_palette,
                     interval if interval > 0 else "default",
                 )
             else:
                 logger.warning(
                     "Skipping stale assignment: client %s → endpoint %s (endpoint not loaded)",
-                    client_id, endpoint_id,
+                    client_id,
+                    endpoint_id,
                 )
 
     # ------------------------------------------------------------------
@@ -144,8 +215,10 @@ class EndpointRegistry:
             self._default_endpoint_id = endpoint.endpoint_id
         self._start_task(endpoint)
         if _persist and self._db is not None:
-            asyncio.ensure_future(self._save_endpoint(endpoint))
-        logger.info("Endpoint added: %s (%s) id=%s", endpoint.name, endpoint.kind, endpoint.endpoint_id)
+            asyncio.create_task(self._save_endpoint(endpoint))
+        logger.info(
+            "Endpoint added: %s (%s) id=%s", endpoint.name, endpoint.kind, endpoint.endpoint_id
+        )
 
     def remove_endpoint(self, endpoint_id: str) -> bool:
         """Remove an endpoint and cancel its loop. Returns True if found."""
@@ -159,7 +232,7 @@ class EndpointRegistry:
         if self._default_endpoint_id == endpoint_id:
             self._default_endpoint_id = next(iter(self._endpoints), None)
         if self._db is not None:
-            asyncio.ensure_future(self._db.delete_endpoint(endpoint_id))
+            asyncio.create_task(self._db.delete_endpoint(endpoint_id))
         logger.info("Endpoint removed: id=%s", endpoint_id)
         return True
 
@@ -172,7 +245,12 @@ class EndpointRegistry:
     async def _save_endpoint(self, endpoint: ImageEndpoint) -> None:
         if self._db is None:
             return
-        from sendspin_image_server.endpoints import HomeAssistantEndpoint, ImmichEndpoint, LocalFolderEndpoint
+        from sendspin_image_server.endpoints import (
+            HomeAssistantEndpoint,
+            ImmichEndpoint,
+            LocalFolderEndpoint,
+        )
+
         if isinstance(endpoint, ImmichEndpoint):
             config: dict[str, Any] = {
                 "base_url": endpoint.base_url,
@@ -193,19 +271,101 @@ class EndpointRegistry:
         await self._db.save_endpoint(endpoint.endpoint_id, endpoint.kind, endpoint.name, config)
 
     # ------------------------------------------------------------------
+    # Device Preset CRUD
+    # ------------------------------------------------------------------
+
+    def add_device_preset(self, preset: DevicePreset, *, _persist: bool = True) -> None:
+        """Register a device preset."""
+        self._device_presets[preset.preset_id] = preset
+        if _persist and self._db is not None:
+            asyncio.create_task(self._save_device_preset(preset))
+        logger.info("Device preset added: %s id=%s", preset.name, preset.preset_id)
+
+    def remove_device_preset(self, preset_id: str) -> bool:
+        """Remove a device preset. Returns True if found."""
+        if preset_id not in self._device_presets:
+            return False
+        del self._device_presets[preset_id]
+        # Unassign any clients using this preset
+        for cid, pid in list(self._preset_assignments.items()):
+            if pid == preset_id:
+                self._preset_assignments[cid] = None
+        if self._db is not None:
+            asyncio.create_task(self._db.delete_device_preset(preset_id))
+        logger.info("Device preset removed: id=%s", preset_id)
+        return True
+
+    def get_device_preset(self, preset_id: str) -> DevicePreset | None:
+        """Get a device preset by ID."""
+        return self._device_presets.get(preset_id)
+
+    def list_device_presets(self) -> list[DevicePreset]:
+        """List all device presets."""
+        return list(self._device_presets.values())
+
+    def update_device_preset(
+        self,
+        preset_id: str,
+        name: str | None = None,
+        dither_algo: DitheringAlgo | None = None,
+        dither_palette: DitheringPalette | None = None,
+        interval: float | None = None,
+    ) -> bool:
+        """Update a device preset. Returns True if preset was found and updated."""
+        if preset_id not in self._device_presets:
+            return False
+        preset = self._device_presets[preset_id]
+        if name is not None:
+            preset.name = name
+        if dither_algo is not None:
+            preset.dither_algo = dither_algo
+        if dither_palette is not None:
+            preset.dither_palette = dither_palette
+        if interval is not None:
+            preset.interval = interval
+        if self._db is not None:
+            asyncio.create_task(self._save_device_preset(preset))
+        logger.info("Device preset updated: id=%s", preset_id)
+        return True
+
+    async def _save_device_preset(self, preset: DevicePreset) -> None:
+        """Persist a device preset to the database."""
+        if self._db is None:
+            return
+        await self._db.save_device_preset(
+            preset_id=preset.preset_id,
+            name=preset.name,
+            dither_algo=preset.dither_algo,
+            dither_palette=preset.dither_palette,
+            interval=preset.interval,
+        )
+
+    # ------------------------------------------------------------------
     # Client assignment
     # ------------------------------------------------------------------
 
-    def assign(self, client_id: str, endpoint_id: str) -> bool:
-        """Point a client at a specific endpoint. Returns False if endpoint not found."""
+    def assign(self, client_id: str, endpoint_id: str, *, preset_id: str | None = None) -> bool:
+        """Point a client at a specific endpoint, optionally assigning a preset. Returns False if endpoint not found."""
         if endpoint_id not in self._endpoints:
             return False
+        if preset_id and preset_id not in self._device_presets:
+            return False
         self._assignments[client_id] = endpoint_id
+        if preset_id:
+            self._preset_assignments[client_id] = preset_id
+            # Clear per-client overrides when using a preset
+            self._client_dither.pop(client_id, None)
+            self._client_palette.pop(client_id, None)
+            self._client_interval.pop(client_id, None)
+        else:
+            self._preset_assignments.pop(client_id, None)
         algo = self._client_dither.get(client_id, self._dither_algo)
         palette = self._client_palette.get(client_id, self._dither_palette)
         interval = self._client_interval.get(client_id, 0)
         if self._db is not None:
-            asyncio.ensure_future(self._db.save_assignment(client_id, endpoint_id, algo, palette, interval))
+            asyncio.create_task(
+                self._db.save_assignment(client_id, endpoint_id, algo, palette, interval, preset_id)
+            )
         logger.info("Client %s assigned to endpoint %s", client_id, endpoint_id)
         return True
 
@@ -215,8 +375,11 @@ class EndpointRegistry:
         endpoint_id = self._assignments.get(client_id)
         palette = self._client_palette.get(client_id, self._dither_palette)
         interval = self._client_interval.get(client_id, 0)
+        preset_id = self._preset_assignments.get(client_id)
         if self._db is not None and endpoint_id:
-            asyncio.ensure_future(self._db.save_assignment(client_id, endpoint_id, algo, palette, interval))
+            asyncio.create_task(
+                self._db.save_assignment(client_id, endpoint_id, algo, palette, interval, preset_id)
+            )
         logger.info("Client %s dither algo set to %s", client_id, algo)
 
     def set_client_palette(self, client_id: str, palette: DitheringPalette) -> None:
@@ -225,8 +388,11 @@ class EndpointRegistry:
         endpoint_id = self._assignments.get(client_id)
         algo = self._client_dither.get(client_id, self._dither_algo)
         interval = self._client_interval.get(client_id, 0)
+        preset_id = self._preset_assignments.get(client_id)
         if self._db is not None and endpoint_id:
-            asyncio.ensure_future(self._db.save_assignment(client_id, endpoint_id, algo, palette, interval))
+            asyncio.create_task(
+                self._db.save_assignment(client_id, endpoint_id, algo, palette, interval, preset_id)
+            )
         logger.info("Client %s dither palette set to %s", client_id, palette)
 
     def set_client_interval(self, client_id: str, interval: float) -> None:
@@ -238,21 +404,74 @@ class EndpointRegistry:
         endpoint_id = self._assignments.get(client_id)
         algo = self._client_dither.get(client_id, self._dither_algo)
         palette = self._client_palette.get(client_id, self._dither_palette)
+        preset_id = self._preset_assignments.get(client_id)
         if self._db is not None and endpoint_id:
-            asyncio.ensure_future(self._db.save_assignment(client_id, endpoint_id, algo, palette, interval))
-        logger.info("Client %s interval set to %ss", client_id, interval if interval > 0 else "default")
+            asyncio.create_task(
+                self._db.save_assignment(client_id, endpoint_id, algo, palette, interval, preset_id)
+            )
+        logger.info(
+            "Client %s interval set to %ss", client_id, interval if interval > 0 else "default"
+        )
+
+    def assign_preset_to_client(self, client_id: str, preset_id: str | None) -> None:
+        """Assign or unassign a device preset for a client."""
+        if preset_id is not None and preset_id not in self._device_presets:
+            msg = f"Preset {preset_id} not found"
+            raise ValueError(msg)
+        self._preset_assignments[client_id] = preset_id
+        # Clear per-client overrides when using a preset (they will be re-applied if set later)
+        if self._db is not None:
+            # Always use the default endpoint when persisting preset assignments
+            endpoint_id = self._default_endpoint_id or ""
+            asyncio.create_task(
+                self._db.save_assignment(
+                    client_id,
+                    endpoint_id,
+                    self._dither_algo,
+                    self._dither_palette,
+                    0,
+                    preset_id,
+                )
+            )
+        logger.info("Client %s preset assignment updated: %s", client_id, preset_id)
 
     def client_dither_algo(self, client_id: str) -> DitheringAlgo:
         """Return the effective dither algorithm for a client."""
-        return cast("DitheringAlgo", self._client_dither.get(client_id, self._dither_algo))
+        # Per-client override takes precedence
+        if client_id in self._client_dither:
+            return cast("DitheringAlgo", self._client_dither[client_id])
+        # Check preset assignment
+        preset_id = self._preset_assignments.get(client_id)
+        if preset_id and preset_id in self._device_presets:
+            return cast("DitheringAlgo", self._device_presets[preset_id].dither_algo)
+        # Fall back to server default
+        return self._dither_algo
 
     def client_dither_palette(self, client_id: str) -> DitheringPalette:
         """Return the effective dither palette for a client."""
-        return cast("DitheringPalette", self._client_palette.get(client_id, self._dither_palette))
+        # Per-client override takes precedence
+        if client_id in self._client_palette:
+            return cast("DitheringPalette", self._client_palette[client_id])
+        # Check preset assignment
+        preset_id = self._preset_assignments.get(client_id)
+        if preset_id and preset_id in self._device_presets:
+            return cast("DitheringPalette", self._device_presets[preset_id].dither_palette)
+        # Fall back to server default
+        return self._dither_palette
 
     def client_interval(self, client_id: str) -> float:
         """Return the effective interval for a client (0 = server default)."""
-        return self._client_interval.get(client_id, 0)
+        # Per-client override takes precedence
+        if client_id in self._client_interval:
+            return self._client_interval[client_id]
+        # Check preset assignment
+        preset_id = self._preset_assignments.get(client_id)
+        if preset_id and preset_id in self._device_presets:
+            preset_interval = self._device_presets[preset_id].interval
+            if preset_interval > 0:
+                return preset_interval
+        # Fall back to server default
+        return 0
 
     def ensure_client(self, client_id: str, name: str, url: str | None = None) -> None:
         """Persist a client's identity and last-known URL.
@@ -264,20 +483,22 @@ class EndpointRegistry:
             return
         self._client_last_url[client_id] = url
         if self._db is not None:
-            asyncio.ensure_future(self._db.upsert_client_url(client_id, name, url))
+            asyncio.create_task(self._db.upsert_client_url(client_id, name, url))
         logger.debug("Recorded last-known URL for client %s (%s): %s", client_id, name, url)
 
     def unassign(self, client_id: str) -> None:
         """Remove explicit assignment; client falls back to default."""
         self._assignments.pop(client_id, None)
+        self._preset_assignments.pop(client_id, None)
         if self._db is not None:
-            asyncio.ensure_future(self._db.delete_assignment(client_id))
+            asyncio.create_task(self._db.delete_assignment(client_id))
 
     def delete_client(self, client_id: str) -> None:
         """Forget a client entirely — removes DB record and in-memory state."""
         if self._db is not None:
-            asyncio.ensure_future(self._db.delete_client(client_id))
+            asyncio.create_task(self._db.delete_client(client_id))
         self._assignments.pop(client_id, None)
+        self._preset_assignments.pop(client_id, None)
         self._client_last_url.pop(client_id, None)
 
     def effective_endpoint_id(self, client_id: str) -> str | None:
@@ -318,22 +539,25 @@ class EndpointRegistry:
                 }
                 for ch in client.artwork_channels
             ]
-            connected.append({
-                "id": client.client_id,
-                "name": client.name,
-                "status": "connected",
-                "roles": client.active_roles,
-                "stream_started": client.stream_started,
-                "artwork_channels": channels,
-                "endpoint_id": eid,
-                "endpoint_name": ep.name if ep else None,
-                "explicit_assignment": self._assignments.get(client.client_id) is not None,
-                "dither_algo": self.client_dither_algo(client.client_id),
-                "dither_palette": self.client_dither_palette(client.client_id),
-                "interval": self.client_interval(client.client_id),
-                "discovered_url": None,
-                "discovered_only": False,
-            })
+            connected.append(
+                {
+                    "id": client.client_id,
+                    "name": client.name,
+                    "status": "connected",
+                    "roles": client.active_roles,
+                    "stream_started": client.stream_started,
+                    "artwork_channels": channels,
+                    "endpoint_id": eid,
+                    "endpoint_name": ep.name if ep else None,
+                    "preset_id": self._preset_assignments.get(client.client_id),
+                    "explicit_assignment": self._assignments.get(client.client_id) is not None,
+                    "dither_algo": self.client_dither_algo(client.client_id),
+                    "dither_palette": self.client_dither_palette(client.client_id),
+                    "interval": self.client_interval(client.client_id),
+                    "discovered_url": None,
+                    "discovered_only": False,
+                }
+            )
 
         # --- Tier 2: mDNS-discovered URLs (may or may not have a known client_id) ---
         # Build a set of client_ids that are visible via mDNS so we can avoid
@@ -370,6 +594,7 @@ class EndpointRegistry:
                 "artwork_channels": [],
                 "endpoint_id": eid,
                 "endpoint_name": ep.name if ep else None,
+                "preset_id": self._preset_assignments.get(entry_id),
                 "explicit_assignment": self._assignments.get(entry_id) is not None,
                 "dither_algo": self.client_dither_algo(entry_id),
                 "dither_palette": self.client_dither_palette(entry_id),
@@ -390,22 +615,25 @@ class EndpointRegistry:
             ep = self._endpoints.get(eid) if eid else None
             # Surface the last-known URL so the UI can offer Force Connect
             last_url: str | None = self._client_last_url.get(db_client_id)
-            offline_db.append({
-                "id": db_client_id,
-                "name": db_client_id,
-                "status": "disconnected",
-                "roles": [],
-                "stream_started": False,
-                "artwork_channels": [],
-                "endpoint_id": eid,
-                "endpoint_name": ep.name if ep else None,
-                "explicit_assignment": True,
-                "dither_algo": self.client_dither_algo(db_client_id),
-                "dither_palette": self.client_dither_palette(db_client_id),
-                "interval": self.client_interval(db_client_id),
-                "discovered_url": last_url,
-                "discovered_only": False,
-            })
+            offline_db.append(
+                {
+                    "id": db_client_id,
+                    "name": db_client_id,
+                    "status": "disconnected",
+                    "roles": [],
+                    "stream_started": False,
+                    "artwork_channels": [],
+                    "endpoint_id": eid,
+                    "endpoint_name": ep.name if ep else None,
+                    "preset_id": self._preset_assignments.get(db_client_id),
+                    "explicit_assignment": True,
+                    "dither_algo": self.client_dither_algo(db_client_id),
+                    "dither_palette": self.client_dither_palette(db_client_id),
+                    "interval": self.client_interval(db_client_id),
+                    "discovered_url": last_url,
+                    "discovered_only": False,
+                }
+            )
 
         return connected + offline_db + discovered_only
 
@@ -445,14 +673,16 @@ class EndpointRegistry:
             try:
                 now = time.monotonic()
                 all_clients = [
-                    c for c in self._server.clients.values()
+                    c
+                    for c in self._server.clients.values()
                     if c.has_artwork
                     and c.stream_started
                     and self.effective_endpoint_id(c.client_id) == endpoint.endpoint_id
                 ]
                 # Determine which clients are due for a push.
                 due_clients = [
-                    c for c in all_clients
+                    c
+                    for c in all_clients
                     if now - last_push.get(c.client_id, 0) >= self._effective_interval(c.client_id)
                 ]
                 if due_clients:
@@ -462,12 +692,16 @@ class EndpointRegistry:
                         continue
                     logger.info(
                         "Endpoint %r: fetched %d bytes, pushing to %d client(s)",
-                        endpoint.name, len(data), len(due_clients),
+                        endpoint.name,
+                        len(data),
+                        len(due_clients),
                     )
                     results = await asyncio.gather(
                         *(
                             _push(
-                                self._server, c, data,
+                                self._server,
+                                c,
+                                data,
                                 self.client_dither_algo(c.client_id),
                                 self.client_dither_palette(c.client_id),
                             )
@@ -476,7 +710,7 @@ class EndpointRegistry:
                         return_exceptions=True,
                     )
                     push_time = time.monotonic()
-                    for c, result in zip(due_clients, results):
+                    for c, result in zip(due_clients, results, strict=False):
                         if isinstance(result, Exception):
                             logger.warning("Failed to push to client %s: %s", c.client_id, result)
                         else:
@@ -508,9 +742,12 @@ async def _push(
     dither_palette: DitheringPalette = "e6",
 ) -> None:
     from sendspin_image_server.stream import push_image_to_client
+
     force_dither = dither_algo != _NO_DITHER_SENTINEL and dither_palette != "none"
     await push_image_to_client(
-        client, data, 0,
+        client,
+        data,
+        0,
         force_e6_dither=force_dither,
         dither_algo=dither_algo if force_dither else "none",
         dither_palette=dither_palette if force_dither else "e6",

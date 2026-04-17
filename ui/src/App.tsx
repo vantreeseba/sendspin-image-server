@@ -1,8 +1,10 @@
 import { Moon, Sun } from 'lucide-react';
 import { useCallback, useState } from 'react';
-import { getClients, getEndpoints } from '@/api';
+import { getClients, getEndpoints, getPresets } from '@/api';
+import { AddDevicePresetDialog } from '@/components/AddDevicePresetDialog';
 import { AddEndpointDialog } from '@/components/AddEndpointDialog';
 import { ClientCard } from '@/components/ClientCard';
+import { DevicePresetCard } from '@/components/DevicePresetCard';
 import { EndpointCard } from '@/components/EndpointCard';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -11,17 +13,21 @@ import { useTheme } from '@/hooks/useTheme';
 
 export default function App() {
   const [addOpen, setAddOpen] = useState(false);
+  const [addPresetOpen, setAddPresetOpen] = useState(false);
   const { theme, toggle } = useTheme();
 
   const fetchClients = useCallback(() => getClients(), []);
   const fetchEndpoints = useCallback(() => getEndpoints(), []);
+  const fetchPresets = useCallback(() => getPresets(), []);
 
   const { data: clients, lastUpdate, refresh: refreshClients } = usePoller(fetchClients, 5000);
   const { data: endpoints, refresh: refreshEndpoints } = usePoller(fetchEndpoints, 5000);
+  const { data: presets, refresh: refreshPresets } = usePoller(fetchPresets, 5000);
 
   function refresh() {
     refreshClients();
     refreshEndpoints();
+    refreshPresets();
   }
 
   return (
@@ -84,10 +90,41 @@ export default function App() {
               ))}
             </div>
           )}
-        </section>
-      </div>
+         </section>
 
-      <AddEndpointDialog open={addOpen} onClose={() => setAddOpen(false)} onAdded={refresh} />
-    </div>
-  );
+         <Separator />
+
+         {/* Device Presets */}
+         <section className="space-y-3">
+           <div className="flex items-center justify-between">
+             <h2 className="font-semibold text-muted-foreground text-xs uppercase tracking-wider">
+               Device Presets
+             </h2>
+             <Button size="sm" onClick={() => setAddPresetOpen(true)}>
+               + Add preset
+             </Button>
+           </div>
+           {!presets || presets.length === 0 ? (
+             <p className="text-muted-foreground text-sm">No device presets created.</p>
+           ) : (
+             <div className="grid gap-3 sm:grid-cols-2">
+               {presets.map((preset) => (
+                 <DevicePresetCard key={preset.id} preset={preset} onChanged={refresh} />
+               ))}
+             </div>
+           )}
+         </section>
+       </div>
+
+       {/* Add Preset Dialog */}
+       <AddDevicePresetDialog
+         open={addPresetOpen}
+         onClose={() => setAddPresetOpen(false)}
+         onAdded={refresh}
+       />
+
+       {/* Add Endpoint Dialog */}
+       <AddEndpointDialog open={addOpen} onClose={() => setAddOpen(false)} onAdded={refresh} />
+      </div>
+    );
 }

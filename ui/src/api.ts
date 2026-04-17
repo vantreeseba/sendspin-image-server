@@ -1,4 +1,11 @@
-import type { Client, DitheringAlgo, DitheringPalette, Endpoint } from './types';
+import type {
+  Client,
+  DitheringAlgo,
+  DitheringPalette,
+  DevicePreset,
+  Endpoint,
+  NewDevicePreset,
+} from './types';
 
 const BASE = '';
 
@@ -77,7 +84,9 @@ export async function deleteEndpoint(id: string): Promise<void> {
 }
 
 export async function deleteClient(clientId: string): Promise<void> {
-  const r = await fetch(`${BASE}/api/clients/${encodeURIComponent(clientId)}`, { method: 'DELETE' });
+  const r = await fetch(`${BASE}/api/clients/${encodeURIComponent(clientId)}`, {
+    method: 'DELETE',
+  });
   if (!r.ok) {
     throw new Error(await r.text());
   }
@@ -110,4 +119,57 @@ export async function addEndpoint(body: NewEndpoint): Promise<Endpoint> {
     throw new Error(await r.text());
   }
   return r.json() as Promise<Endpoint>;
+}
+
+// ------ Device Presets ------ //
+export async function getPresets(): Promise<DevicePreset[]> {
+  const r = await fetch(`${BASE}/api/device-presets`);
+  if (!r.ok) {
+    throw new Error(await r.text());
+  }
+  return r.json() as Promise<DevicePreset[]>;
+}
+
+export async function addPreset(body: NewDevicePreset): Promise<DevicePreset> {
+  const r = await fetch(`${BASE}/api/device-presets`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    throw new Error(await r.text());
+  }
+  return r.json() as Promise<DevicePreset>;
+}
+
+export async function updatePreset(id: string, body: Partial<NewDevicePreset>): Promise<DevicePreset> {
+  const r = await fetch(`${BASE}/api/device-presets/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    throw new Error(await r.text());
+  }
+  return r.json() as Promise<DevicePreset>;
+}
+
+export async function deletePreset(id: string): Promise<void> {
+  const r = await fetch(`${BASE}/api/device-presets/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+  if (!r.ok) {
+    throw new Error(await r.text());
+  }
+}
+
+export async function assignPresetToClient(clientId: string, presetId: string | null): Promise<void> {
+  const r = await fetch(`${BASE}/api/clients/${encodeURIComponent(clientId)}/preset`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ preset_id: presetId }),
+  });
+  if (!r.ok) {
+    throw new Error(await r.text());
+  }
 }

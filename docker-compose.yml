@@ -1,0 +1,29 @@
+version: "3.8"
+
+services:
+  sendspin-image-server:
+    image: sendspin-image-server:latest
+    container_name: sendspin-image-server
+    restart: unless-stopped
+    ports:
+      - "8927:8927" # WebSocket
+      - "8928:8928" # HTTP/UI
+    volumes:
+      - sendspin-images:/app/images
+      - sendspin-data:/data
+    environment:
+      - PYTHONUNBUFFERED=1
+
+volumes:
+  sendspin-images:
+    driver: local
+    driver_opts:
+      type: none
+      device: /home/vantreeseba/code/vantreeseba/home_automation/sendspin-image-server/images
+      o: bind
+  sendspin-data:
+    driver: local
+    driver_opts:
+      type: none
+      device: /home/vantreeseba/code/vantreeseba/home_automation/sendspin-image-server/data
+      o: bind

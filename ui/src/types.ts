@@ -44,6 +44,7 @@ export interface Client {
   interval: number; // seconds; 0 = server default
   discovered_url?: string | null;
   discovered_only: boolean;
+  preset_id?: string | null;
 }
 
 export interface Endpoint {
@@ -60,4 +61,22 @@ export interface Endpoint {
   base_url?: string;
   // homeassistant
   media_content_id?: string;
+}
+
+export interface DevicePreset {
+  id: string;
+  name: string;
+  dither_algo: DitheringAlgo;
+  dither_palette: DitheringPalette;
+  interval: number; // seconds; 0 = server default
+  builtin?: boolean;
+  is_default?: boolean;
+  client_count?: number;
+}
+
+export interface NewDevicePreset {
+  name: string;
+  dither_algo: DitheringAlgo;
+  dither_palette: DitheringPalette;
+  interval: number;
 }
