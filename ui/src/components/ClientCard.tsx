@@ -229,24 +229,24 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
           </Select>
         )}
 
-         {/* Palette selector — hidden for discovered-only clients */}
-         {!isDiscovered && (
-           <Select
-             value={selectedPalette}
-             onValueChange={(v) => setSelectedPalette(v as DitheringPalette)}
-           >
-             <SelectTrigger size="sm" className="w-full text-xs">
-               <SelectValue />
-             </SelectTrigger>
-             <SelectContent>
-               {PALETTE_OPTIONS.map((opt) => (
-                 <SelectItem key={opt.value} value={opt.value} className="text-xs">
-                   {opt.label}
-                 </SelectItem>
-               ))}
-             </SelectContent>
-           </Select>
-         )}
+         {/* Palette selector — hidden for discovered-only clients or when a preset is active */}
+         {!isDiscovered && selectedPreset === null && (
+            <Select
+              value={selectedPalette}
+              onValueChange={(v) => setSelectedPalette(v as DitheringPalette)}
+            >
+              <SelectTrigger size="sm" className="w-full text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PALETTE_OPTIONS.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value} className="text-xs">
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
 
          {/* Preset selector — hidden for discovered-only clients */}
          {!isDiscovered && (
@@ -276,9 +276,9 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
            </div>
          )}
 
-         {/* Dithering algorithm selector — hidden for discovered-only clients */}
-         {!isDiscovered && (
-           <Select value={selectedAlgo} onValueChange={(v) => setSelectedAlgo(v as DitheringAlgo)}>
+          {/* Dithering algorithm selector — hidden for discovered-only clients or when a preset is active */}
+          {!isDiscovered && selectedPreset === null && (
+            <Select value={selectedAlgo} onValueChange={(v) => setSelectedAlgo(v as DitheringAlgo)}>
              <SelectTrigger size="sm" className="w-full text-xs">
                <SelectValue />
              </SelectTrigger>
@@ -292,8 +292,8 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
            </Select>
          )}
 
-        {/* Interval input — hidden for discovered-only clients */}
-        {!isDiscovered && (
+         {/* Interval input — hidden for discovered-only clients or when a preset is active */}
+         {!isDiscovered && selectedPreset === null && (
           <Input
             type="number"
             min={0}
