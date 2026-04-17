@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.5.0 (2026-04-17)
+
+### Features
+
+- Bump version again and force deploy.
+  ([`52717e1`](https://github.com/vantreeseba/sendspin-image-server/commit/52717e1957479e5ff28fc0b420f48d255d67f805))
+
+
 ## v1.4.0 (2026-04-17)
 
 
