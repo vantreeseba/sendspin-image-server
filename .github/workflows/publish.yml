@@ -49,6 +49,19 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: 'ui/package-lock.json'
+
+      - name: Install UI dependencies
+        run: cd ui && npm ci
+
+      - name: Build UI
+        run: cd ui && npm run build
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
