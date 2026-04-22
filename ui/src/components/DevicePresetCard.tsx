@@ -5,10 +5,12 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import type { DevicePreset } from '@/types';
 import { DITHERING_ALGOS, PALETTE_LABELS } from '@/types';
+import { Pencil } from 'lucide-react';
 
 interface Props {
   preset: DevicePreset;
   onChanged: () => void;
+  onEdit?: () => void;
 }
 
 const ALGO_LABELS: Record<string, string> = Object.fromEntries(
@@ -26,7 +28,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
-export function DevicePresetCard({ preset, onChanged }: Props) {
+export function DevicePresetCard({ preset, onChanged, onEdit }: Props) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -65,6 +67,16 @@ export function DevicePresetCard({ preset, onChanged }: Props) {
               >
                 default
               </Badge>
+            )}
+            {onEdit && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0"
+                onClick={() => onEdit?.()}
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
             )}
             {!preset.builtin && (
               <Button

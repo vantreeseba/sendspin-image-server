@@ -1,11 +1,13 @@
 import { Moon, Sun } from 'lucide-react';
 import { useCallback, useState } from 'react';
-import { getClients, getEndpoints, getPresets } from '@/api';
+import { getClients, getEndpoints, getPresets, updatePreset } from '@/api';
 import { AddDevicePresetDialog } from '@/components/AddDevicePresetDialog';
 import { AddEndpointDialog } from '@/components/AddEndpointDialog';
 import { ClientCard } from '@/components/ClientCard';
 import { DevicePresetCard } from '@/components/DevicePresetCard';
+import { EditDevicePresetDialog } from '@/components/EditDevicePresetDialog';
 import { EndpointCard } from '@/components/EndpointCard';
+import type { DevicePreset } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { usePoller } from '@/hooks/usePoller';
@@ -14,20 +16,29 @@ import { useTheme } from '@/hooks/useTheme';
 export default function App() {
   const [addOpen, setAddOpen] = useState(false);
   const [addPresetOpen, setAddPresetOpen] = useState(false);
+  const [editingPreset, setEditingPreset] = useState<DevicePreset | null>(null);
   const { theme, toggle } = useTheme();
 
   const fetchClients = useCallback(() => getClients(), []);
   const fetchEndpoints = useCallback(() => getEndpoints(), []);
   const fetchPresets = useCallback(() => getPresets(), []);
+  const setEditing = useCallback((p: DevicePreset | null) => setEditingPreset(p), []);
 
   const { data: clients, lastUpdate, refresh: refreshClients } = usePoller(fetchClients, 5000);
   const { data: endpoints, refresh: refreshEndpoints } = usePoller(fetchEndpoints, 5000);
   const { data: presets, refresh: refreshPresets } = usePoller(fetchPresets, 5000);
 
-  function refresh() {
+  async function refresh() {
     refreshClients();
     refreshEndpoints();
     refreshPresets();
+  }
+
+  async function handleSaveEdit(updates: Partial<DevicePreset>) {
+    if (!editingPreset) return;
+    await updatePreset(editingPreset.id, updates);
+    await refresh();
+    setEditingPreset(null);
   }
 
   return (
@@ -109,7 +120,7 @@ export default function App() {
            ) : (
              <div className="grid gap-3 sm:grid-cols-2">
                {presets.map((preset) => (
-                 <DevicePresetCard key={preset.id} preset={preset} onChanged={refresh} />
+                 <DevicePresetCard key={preset.id} preset={preset} onChanged={refresh} onEdit={setEditing} />
                ))}
              </div>
            )}
@@ -122,6 +133,18 @@ export default function App() {
          onClose={() => setAddPresetOpen(false)}
          onAdded={refresh}
        />
+
+       {/* Edit Preset Dialog */}
+       {editingPreset && (
+         <EditDevicePresetDialog
+           preset={editingPreset}
+           open={true}
+           onOpenChange={(open) => {
+             if (!open) setEditingPreset(null);
+           }}
+           onSave={handleSaveEdit}
+         />
+       )}
 
        {/* Add Endpoint Dialog */}
        <AddEndpointDialog open={addOpen} onClose={() => setAddOpen(false)} onAdded={refresh} />
