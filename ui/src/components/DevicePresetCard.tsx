@@ -10,7 +10,7 @@ import { Pencil } from 'lucide-react';
 interface Props {
   preset: DevicePreset;
   onChanged: () => void;
-  onEdit?: () => void;
+  onEdit?: (preset: DevicePreset) => void;
 }
 
 const ALGO_LABELS: Record<string, string> = Object.fromEntries(
@@ -73,7 +73,7 @@ export function DevicePresetCard({ preset, onChanged, onEdit }: Props) {
                 variant="ghost"
                 size="sm"
                 className="h-6 w-6 p-0"
-                onClick={() => onEdit?.()}
+                onClick={() => onEdit?.(preset)}
               >
                 <Pencil className="h-3.5 w-3.5" />
               </Button>

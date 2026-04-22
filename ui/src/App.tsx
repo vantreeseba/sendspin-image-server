@@ -120,7 +120,7 @@ export default function App() {
            ) : (
              <div className="grid gap-3 sm:grid-cols-2">
                {presets.map((preset) => (
-                 <DevicePresetCard key={preset.id} preset={preset} onChanged={refresh} onEdit={setEditing} />
+                 <DevicePresetCard key={preset.id} preset={preset} onChanged={refresh} onEdit={(p) => setEditing(p)} />
                ))}
              </div>
            )}

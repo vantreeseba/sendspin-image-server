@@ -68,7 +68,7 @@ export function EditDevicePresetDialog({ preset, open, onOpenChange, onSave }: P
           </div>
           <div className="grid gap-2">
             <Label htmlFor="edit-algo">Algorithm</Label>
-            <Select value={currentDitherAlgo} onValueChange={setDitherAlgo}>
+            <Select value={currentDitherAlgo} onValueChange={(v) => setDitherAlgo(v as "none" | "floyd-steinberg" | "floyd-steinberg-serpentine" | "atkinson" | "ordered")}>
               <SelectTrigger id="edit-algo">
                 <SelectValue placeholder="Select algorithm" />
               </SelectTrigger>
@@ -83,7 +83,7 @@ export function EditDevicePresetDialog({ preset, open, onOpenChange, onSave }: P
           </div>
           <div className="grid gap-2">
             <Label htmlFor="edit-palette">Palette</Label>
-            <Select value={currentDitherPalette} onValueChange={setDitherPalette}>
+            <Select value={currentDitherPalette} onValueChange={(v) => setDitherPalette(v as "none" | "bw" | "e6")}>
               <SelectTrigger id="edit-palette">
                 <SelectValue placeholder="Select palette" />
               </SelectTrigger>
