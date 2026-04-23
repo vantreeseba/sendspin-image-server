@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.8.1 (2026-04-23)
+
+### Bug Fixes
+
+- **debug**: Track per-client image bytes for debug preview endpoint
+  ([`129d0ce`](https://github.com/vantreeseba/sendspin-image-server/commit/129d0ce604504031aae7f5c97193c1de4be121e1))
+
+
 ## v1.8.0 (2026-04-23)
 
 ### Features
