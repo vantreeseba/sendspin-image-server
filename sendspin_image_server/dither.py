@@ -19,8 +19,8 @@ All palette-based algorithms use the same nearest-colour lookup: a per-palette
 RGB triple to the closest palette index using CIE L*a*b* distance. Each bucket
 covers 4 raw sRGB values (±2 counts max error per channel).
 
-The dithered image is returned as a PIL RGB Image; callers that need bytes use
-floyd_steinberg_e6() / encode_pil().
+ The dithered image is returned as a PIL RGB Image; callers that need bytes use
+dither_to_pil() / encode_pil().
 """
 
 from __future__ import annotations
@@ -352,18 +352,27 @@ def encode_pil(pil_img: Image.Image, orig_format: str) -> bytes:
     return buf.getvalue()
 
 
-def floyd_steinberg_e6(
+def dither_to_bytes(
     image_bytes: bytes,
     algo: DitheringAlgo = "floyd-steinberg",
-    output_format: str = "JPEG",
+    output_format: str = "png",
     palette: DitheringPalette = "e6",
 ) -> bytes:
-    """Dither *image_bytes* and return encoded bytes in *output_format*.
+    """Apply dithering and return the encoded result.
 
-    - **algo**: Dithering algorithm (e.g. ``"floyd-steinberg"``). Defaults to
-      ``"floyd-steinberg"``.
-    - **output_format**: Pillow format string (e.g. "JPEG", "PNG"). Defaults to "JPEG".
-    - **palette**: Colour palette to restrict pixels to. Defaults to "e6".
+    This is a convenience wrapper around :func:`dither_to_pil` + :func:`encode_pil`
+    for callers that work with raw byte buffers and need a final byte payload.
+
+    Args:
+        image_bytes:   Raw image bytes (RGB / JPEG / PNG).
+        algo:          Dithering algorithm to use (default ``"floyd-steinberg"``).
+        output_format: Output image format passed to :func:`encode_pil`
+                       (default ``"png"``, must be a Pillow-supported format).
+        palette:       Dithering palette to use (default ``"e6"``).
+
+    Returns:
+        ``bytes``: The final encoded image data after resizing, dithering,
+        and the requested encoding step.
     """
     src = Image.open(io.BytesIO(image_bytes))
     src.load()

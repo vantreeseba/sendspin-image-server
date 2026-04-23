@@ -10,7 +10,7 @@ import struct
 from PIL import Image
 
 from sendspin_image_server.client import ClientState, server_time_us
-from sendspin_image_server.dither import DitheringAlgo, DitheringPalette, encode_pil, floyd_steinberg_e6
+from sendspin_image_server.dither import DitheringAlgo, DitheringPalette, dither_to_bytes, encode_pil
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +124,7 @@ async def push_image_to_client(
             dither_algo, dither_palette, client.client_id, channel, output_format,
         )
         image_bytes = await loop.run_in_executor(
-            None, floyd_steinberg_e6, image_bytes, dither_algo, output_format, dither_palette
+            None, dither_to_bytes, image_bytes, dither_algo, output_format, dither_palette
         )
     else:
         # Re-encode to the client's requested format even without dithering
