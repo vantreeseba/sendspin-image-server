@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.8.2 (2026-04-23)
+
+### Bug Fixes
+
+- **server**: Restore floyd_steinberg_e6 public name, per-client image tracking for debug
+  ([`d4b86b9`](https://github.com/vantreeseba/sendspin-image-server/commit/d4b86b9f4317e33d4e1964f0f996f69f17081982))
+
+
 ## v1.8.1 (2026-04-23)
 
 ### Bug Fixes
