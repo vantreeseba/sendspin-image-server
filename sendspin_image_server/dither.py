@@ -330,7 +330,7 @@ def dither_to_pil(
     # Dispatch to Lab LUT-based algorithm (all use _nearest)
     match algo:
         case "floyd-steinberg":
-            return _floyd_steinberg(img, palette)
+            return _serpentine(img, palette)
         case "floyd-steinberg-serpentine":
             return _serpentine(img, palette)
         case "atkinson":
@@ -352,27 +352,29 @@ def encode_pil(pil_img: Image.Image, orig_format: str) -> bytes:
     return buf.getvalue()
 
 
-def _floyd_steinberg(
+def floyd_steinberg_e6(
     image_bytes: bytes,
+    algo: DitheringAlgo = "floyd-steinberg",
+    output_format: str = "JPEG",
     palette: DitheringPalette = "e6",
 ) -> bytes:
     """Dither *image_bytes* and return encoded bytes in *output_format*.
 
+    - **algo**: Dithering algorithm (e.g. ``"floyd-steinberg"``). Defaults to
+      ``"floyd-steinberg"``.
     - **output_format**: Pillow format string (e.g. "JPEG", "PNG"). Defaults to "JPEG".
-    - **palette**: The colour palette to restrict pixels to. Defaults to "e6".
+    - **palette**: Colour palette to restrict pixels to. Defaults to "e6".
     """
-
-    output_format = "JPEG"
     src = Image.open(io.BytesIO(image_bytes))
     src.load()
     orig_size = src.size
 
-    out = dither_to_pil(image_bytes, "floyd-steinberg", palette=palette)
+    out = dither_to_pil(image_bytes, algo, palette=palette)
     result = encode_pil(out, output_format)
 
     logger.debug(
         "dither (%s, palette=%s) complete: %dx%d → %s  %d bytes → %d bytes",
-        "floyd-steinberg", palette, orig_size[0], orig_size[1], output_format,
+        algo, palette, orig_size[0], orig_size[1], output_format,
         len(image_bytes), len(result),
     )
     return result
