@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import type { NewDevicePreset } from '@/types';
 import { addPreset } from '@/api';
 import { Button } from '@/components/ui/button';
 import {
@@ -18,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import type { DitheringAlgo, DitheringPalette } from '@/types';
+import type { DitheringAlgo, DitheringPalette, NewDevicePreset } from '@/types';
 import { DITHERING_ALGOS, DITHERING_PALETTES, PALETTE_LABELS } from '@/types';
 
 interface Props {

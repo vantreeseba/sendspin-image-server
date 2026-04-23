@@ -7,11 +7,11 @@ import { ClientCard } from '@/components/ClientCard';
 import { DevicePresetCard } from '@/components/DevicePresetCard';
 import { EditDevicePresetDialog } from '@/components/EditDevicePresetDialog';
 import { EndpointCard } from '@/components/EndpointCard';
-import type { DevicePreset } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { usePoller } from '@/hooks/usePoller';
 import { useTheme } from '@/hooks/useTheme';
+import type { DevicePreset } from '@/types';
 
 export default function App() {
   const [addOpen, setAddOpen] = useState(false);
@@ -101,53 +101,58 @@ export default function App() {
               ))}
             </div>
           )}
-         </section>
+        </section>
 
-         <Separator />
+        <Separator />
 
-         {/* Device Presets */}
-         <section className="space-y-3">
-           <div className="flex items-center justify-between">
-             <h2 className="font-semibold text-muted-foreground text-xs uppercase tracking-wider">
-               Device Presets
-             </h2>
-             <Button size="sm" onClick={() => setAddPresetOpen(true)}>
-               + Add preset
-             </Button>
-           </div>
-           {!presets || presets.length === 0 ? (
-             <p className="text-muted-foreground text-sm">No device presets created.</p>
-           ) : (
-             <div className="grid gap-3 sm:grid-cols-2">
-               {presets.map((preset) => (
-                 <DevicePresetCard key={preset.id} preset={preset} onChanged={refresh} onEdit={(p) => setEditing(p)} />
-               ))}
-             </div>
-           )}
-         </section>
-       </div>
-
-       {/* Add Preset Dialog */}
-       <AddDevicePresetDialog
-         open={addPresetOpen}
-         onClose={() => setAddPresetOpen(false)}
-         onAdded={refresh}
-       />
-
-       {/* Edit Preset Dialog */}
-       {editingPreset && (
-         <EditDevicePresetDialog
-           preset={editingPreset}
-           open={true}
-           onOpenChange={(open) => {
-             if (!open) setEditingPreset(null);
-           }}
-           onSave={handleSaveEdit}
-         />
-       )}
-
-       {/* Add Endpoint Dialog */}
-       <AddEndpointDialog open={addOpen} onClose={() => setAddOpen(false)} onAdded={refresh} />
+        {/* Device Presets */}
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="font-semibold text-muted-foreground text-xs uppercase tracking-wider">
+              Device Presets
+            </h2>
+            <Button size="sm" onClick={() => setAddPresetOpen(true)}>
+              + Add preset
+            </Button>
+          </div>
+          {!presets || presets.length === 0 ? (
+            <p className="text-muted-foreground text-sm">No device presets created.</p>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {presets.map((preset) => (
+                <DevicePresetCard
+                  key={preset.id}
+                  preset={preset}
+                  onChanged={refresh}
+                  onEdit={(p) => setEditing(p)}
+                />
+              ))}
+            </div>
+          )}
+        </section>
       </div>
-    );
+
+      {/* Add Preset Dialog */}
+      <AddDevicePresetDialog
+        open={addPresetOpen}
+        onClose={() => setAddPresetOpen(false)}
+        onAdded={refresh}
+      />
+
+      {/* Edit Preset Dialog */}
+      {editingPreset && (
+        <EditDevicePresetDialog
+          preset={editingPreset}
+          open={true}
+          onOpenChange={(open) => {
+            if (!open) setEditingPreset(null);
+          }}
+          onSave={handleSaveEdit}
+        />
+      )}
+
+      {/* Add Endpoint Dialog */}
+      <AddEndpointDialog open={addOpen} onClose={() => setAddOpen(false)} onAdded={refresh} />
+    </div>
+  );
 }

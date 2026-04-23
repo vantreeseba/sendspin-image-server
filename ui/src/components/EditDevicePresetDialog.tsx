@@ -1,26 +1,17 @@
-import { useCallback, useState } from "react";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { useCallback, useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import {
-  DITHERING_ALGOS,
-  DITHERING_PALETTES,
-  PALETTE_LABELS,
-} from "@/types";
-import type { DevicePreset } from "@/types";
+} from '@/components/ui/select';
+import type { DevicePreset } from '@/types';
+import { DITHERING_ALGOS, DITHERING_PALETTES, PALETTE_LABELS } from '@/types';
 
 interface Props {
   preset: DevicePreset;
@@ -68,14 +59,31 @@ export function EditDevicePresetDialog({ preset, open, onOpenChange, onSave }: P
           </div>
           <div className="grid gap-2">
             <Label htmlFor="edit-algo">Algorithm</Label>
-            <Select value={currentDitherAlgo} onValueChange={(v) => setDitherAlgo(v as "none" | "floyd-steinberg" | "floyd-steinberg-serpentine" | "atkinson" | "ordered")}>
+            <Select
+              value={currentDitherAlgo}
+              onValueChange={(v) =>
+                setDitherAlgo(
+                  v as
+                    | 'none'
+                    | 'floyd-steinberg'
+                    | 'floyd-steinberg-serpentine'
+                    | 'atkinson'
+                    | 'ordered',
+                )
+              }
+            >
               <SelectTrigger id="edit-algo">
                 <SelectValue placeholder="Select algorithm" />
               </SelectTrigger>
               <SelectContent>
                 {DITHERING_ALGOS.map((algo) => (
                   <SelectItem key={algo} value={algo}>
-                    {algo === "none" ? "None" : algo.split("-").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ")}
+                    {algo === 'none'
+                      ? 'None'
+                      : algo
+                          .split('-')
+                          .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+                          .join(' ')}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -83,7 +91,10 @@ export function EditDevicePresetDialog({ preset, open, onOpenChange, onSave }: P
           </div>
           <div className="grid gap-2">
             <Label htmlFor="edit-palette">Palette</Label>
-            <Select value={currentDitherPalette} onValueChange={(v) => setDitherPalette(v as "none" | "bw" | "e6")}>
+            <Select
+              value={currentDitherPalette}
+              onValueChange={(v) => setDitherPalette(v as 'none' | 'bw' | 'e6')}
+            >
               <SelectTrigger id="edit-palette">
                 <SelectValue placeholder="Select palette" />
               </SelectTrigger>

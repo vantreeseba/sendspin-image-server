@@ -1,4 +1,6 @@
+import { Eye } from 'lucide-react';
 import { useEffect, useState } from 'react';
+
 import {
   assignClient,
   assignPresetToClient,
@@ -9,6 +11,7 @@ import {
   setClientInterval,
   setClientPalette,
 } from '@/api';
+import { ClientDebugPreviewDialog } from '@/components/ClientDebugPreviewDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -21,7 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import type { Client, DitheringAlgo, DitheringPalette, DevicePreset, Endpoint } from '@/types';
+import type { Client, DevicePreset, DitheringAlgo, DitheringPalette, Endpoint } from '@/types';
 import { DITHERING_ALGOS, DITHERING_PALETTES, PALETTE_LABELS } from '@/types';
 
 interface Props {
@@ -65,6 +68,7 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
   const [deleting, setDeleting] = useState(false);
   const [presets, setPresets] = useState<DevicePreset[]>([]);
   const [err, setErr] = useState<string | null>(null);
+  const [debugOpen, setDebugOpen] = useState(false);
 
   const ch = client.artwork_channels[0];
   const parsedInterval = intervalInput === '' ? 0 : Number(intervalInput);
@@ -73,7 +77,9 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
 
   // Load presets for the preset selector
   useEffect(() => {
-    getPresets().then(setPresets).catch(() => {});
+    getPresets()
+      .then(setPresets)
+      .catch(() => {});
   }, []);
 
   const isDirty =
@@ -83,45 +89,45 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
     selectedPreset !== client.preset_id ||
     parsedInterval !== client.interval;
 
-   const presetLabel = presets.find((p) => p.id === selectedPreset)?.name ?? 'None';
+  const presetLabel = presets.find((p) => p.id === selectedPreset)?.name ?? 'None';
 
-   async function handleUpdate() {
-     if (!intervalValid) {
-       return;
-     }
-     setBusy(true);
-     setErr(null);
-     try {
-       const tasks: Promise<void>[] = [];
+  async function handleUpdate() {
+    if (!intervalValid) {
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    try {
+      const tasks: Promise<void>[] = [];
 
-       if (selectedEndpoint && selectedEndpoint !== client.endpoint_id) {
-         tasks.push(assignClient(client.id, selectedEndpoint));
-       }
+      if (selectedEndpoint && selectedEndpoint !== client.endpoint_id) {
+        tasks.push(assignClient(client.id, selectedEndpoint));
+      }
 
-       if (selectedAlgo !== client.dither_algo) {
-         tasks.push(setClientDither(client.id, selectedAlgo));
-       }
+      if (selectedAlgo !== client.dither_algo) {
+        tasks.push(setClientDither(client.id, selectedAlgo));
+      }
 
-       if (selectedPalette !== client.dither_palette) {
-         tasks.push(setClientPalette(client.id, selectedPalette));
-       }
+      if (selectedPalette !== client.dither_palette) {
+        tasks.push(setClientPalette(client.id, selectedPalette));
+      }
 
-       if (parsedInterval !== client.interval) {
-         tasks.push(setClientInterval(client.id, parsedInterval));
-       }
+      if (parsedInterval !== client.interval) {
+        tasks.push(setClientInterval(client.id, parsedInterval));
+      }
 
-       if (selectedPreset !== client.preset_id) {
-         tasks.push(assignPresetToClient(client.id, selectedPreset));
-       }
+      if (selectedPreset !== client.preset_id) {
+        tasks.push(assignPresetToClient(client.id, selectedPreset));
+      }
 
-       await Promise.all(tasks);
-       onChanged();
-     } catch (e) {
-       setErr(e instanceof Error ? e.message : String(e));
-     } finally {
-       setBusy(false);
-     }
-   }
+      await Promise.all(tasks);
+      onChanged();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function handleConnect() {
     setConnecting(true);
@@ -187,6 +193,15 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
             )}
             <Button
               size="sm"
+              variant="ghost"
+              className="h-7 w-7 shrink-0 p-0"
+              title="Debug preview"
+              onClick={() => setDebugOpen(true)}
+            >
+              <Eye className="h-4 w-4 text-foreground/50" />
+            </Button>
+            <Button
+              size="sm"
               variant="outline"
               onClick={handleDelete}
               disabled={deleting}
@@ -229,71 +244,71 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
           </Select>
         )}
 
-         {/* Palette selector — hidden for discovered-only clients or when a preset is active */}
-         {!isDiscovered && selectedPreset === null && (
+        {/* Palette selector — hidden for discovered-only clients or when a preset is active */}
+        {!isDiscovered && selectedPreset === null && (
+          <Select
+            value={selectedPalette}
+            onValueChange={(v) => setSelectedPalette(v as DitheringPalette)}
+          >
+            <SelectTrigger size="sm" className="w-full text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PALETTE_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value} className="text-xs">
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+
+        {/* Preset selector — hidden for discovered-only clients */}
+        {!isDiscovered && (
+          <div className="space-y-1.5">
+            <Label>Device Preset</Label>
             <Select
-              value={selectedPalette}
-              onValueChange={(v) => setSelectedPalette(v as DitheringPalette)}
+              value={selectedPreset ?? ''}
+              onValueChange={(v) => setSelectedPreset(v === 'none' ? null : (v as string))}
             >
               <SelectTrigger size="sm" className="w-full text-xs">
-                <SelectValue />
+                <SelectValue placeholder="None" />
               </SelectTrigger>
               <SelectContent>
-                {PALETTE_OPTIONS.map((opt) => (
-                  <SelectItem key={opt.value} value={opt.value} className="text-xs">
-                    {opt.label}
+                <SelectItem value="none" className="text-xs">
+                  None (use per-client settings)
+                </SelectItem>
+                {presets.map((preset) => (
+                  <SelectItem key={preset.id} value={preset.id} className="text-xs">
+                    {preset.name}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-          )}
+            <p className="text-muted-foreground text-xs">
+              {presetLabel ? `Preset: ${presetLabel}` : 'Not assigned'}
+            </p>
+          </div>
+        )}
 
-         {/* Preset selector — hidden for discovered-only clients */}
-         {!isDiscovered && (
-           <div className="space-y-1.5">
-             <Label>Device Preset</Label>
-             <Select
-               value={selectedPreset ?? ''}
-               onValueChange={(v) => setSelectedPreset(v === 'none' ? null : (v as string))}
-             >
-               <SelectTrigger size="sm" className="w-full text-xs">
-                 <SelectValue placeholder="None" />
-               </SelectTrigger>
-               <SelectContent>
-                 <SelectItem value="none" className="text-xs">
-                   None (use per-client settings)
-                 </SelectItem>
-                 {presets.map((preset) => (
-                   <SelectItem key={preset.id} value={preset.id} className="text-xs">
-                     {preset.name}
-                   </SelectItem>
-                 ))}
-               </SelectContent>
-             </Select>
-             <p className="text-muted-foreground text-xs">
-               {presetLabel ? `Preset: ${presetLabel}` : 'Not assigned'}
-             </p>
-           </div>
-         )}
+        {/* Dithering algorithm selector — hidden for discovered-only clients or when a preset is active */}
+        {!isDiscovered && selectedPreset === null && (
+          <Select value={selectedAlgo} onValueChange={(v) => setSelectedAlgo(v as DitheringAlgo)}>
+            <SelectTrigger size="sm" className="w-full text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {ALGO_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value} className="text-xs">
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
 
-          {/* Dithering algorithm selector — hidden for discovered-only clients or when a preset is active */}
-          {!isDiscovered && selectedPreset === null && (
-            <Select value={selectedAlgo} onValueChange={(v) => setSelectedAlgo(v as DitheringAlgo)}>
-             <SelectTrigger size="sm" className="w-full text-xs">
-               <SelectValue />
-             </SelectTrigger>
-             <SelectContent>
-               {ALGO_OPTIONS.map((opt) => (
-                 <SelectItem key={opt.value} value={opt.value} className="text-xs">
-                   {opt.label}
-                 </SelectItem>
-               ))}
-             </SelectContent>
-           </Select>
-         )}
-
-         {/* Interval input — hidden for discovered-only clients or when a preset is active */}
-         {!isDiscovered && selectedPreset === null && (
+        {/* Interval input — hidden for discovered-only clients or when a preset is active */}
+        {!isDiscovered && selectedPreset === null && (
           <Input
             type="number"
             min={0}
@@ -332,6 +347,12 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
 
         {err && <p className="text-destructive text-xs">{err}</p>}
       </CardContent>
+
+      <ClientDebugPreviewDialog
+        clientId={client.id}
+        open={debugOpen}
+        onOpenChange={(open) => setDebugOpen(open)}
+      />
     </Card>
   );
 }

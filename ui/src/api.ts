@@ -1,8 +1,8 @@
 import type {
   Client,
+  DevicePreset,
   DitheringAlgo,
   DitheringPalette,
-  DevicePreset,
   Endpoint,
   NewDevicePreset,
 } from './types';
@@ -92,6 +92,16 @@ export async function deleteClient(clientId: string): Promise<void> {
   }
 }
 
+export async function getDebugImage(clientId: string): Promise<Blob | null> {
+  try {
+    const r = await fetch(`${BASE}/api/clients/${encodeURIComponent(clientId)}/debug-image`);
+    if (!r.ok) return null;
+    return r.blob();
+  } catch {
+    return null;
+  }
+}
+
 export type NewLocalEndpoint = { kind: 'local'; name: string; path: string };
 export type NewImmichEndpoint = {
   kind: 'immich';
@@ -142,7 +152,10 @@ export async function addPreset(body: NewDevicePreset): Promise<DevicePreset> {
   return r.json() as Promise<DevicePreset>;
 }
 
-export async function updatePreset(id: string, body: Partial<NewDevicePreset>): Promise<DevicePreset> {
+export async function updatePreset(
+  id: string,
+  body: Partial<NewDevicePreset>,
+): Promise<DevicePreset> {
   const r = await fetch(`${BASE}/api/device-presets/${encodeURIComponent(id)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -163,7 +176,10 @@ export async function deletePreset(id: string): Promise<void> {
   }
 }
 
-export async function assignPresetToClient(clientId: string, presetId: string | null): Promise<void> {
+export async function assignPresetToClient(
+  clientId: string,
+  presetId: string | null,
+): Promise<void> {
   const r = await fetch(`${BASE}/api/clients/${encodeURIComponent(clientId)}/preset`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

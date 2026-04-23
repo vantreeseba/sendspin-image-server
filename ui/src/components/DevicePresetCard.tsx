@@ -1,3 +1,4 @@
+import { Pencil } from 'lucide-react';
 import { useState } from 'react';
 import { deletePreset } from '@/api';
 import { Badge } from '@/components/ui/badge';
@@ -5,7 +6,6 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import type { DevicePreset } from '@/types';
 import { DITHERING_ALGOS, PALETTE_LABELS } from '@/types';
-import { Pencil } from 'lucide-react';
 
 interface Props {
   preset: DevicePreset;

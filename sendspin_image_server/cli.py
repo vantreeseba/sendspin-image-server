@@ -478,6 +478,22 @@ async def run(
         registry.set_client_interval(client_id, interval)
         return web.Response(status=204)
 
+    async def api_get_client_debug_image(request: web.Request) -> web.Response:
+        """GET /api/clients/{id}/debug-image — return the last image pushed to a client."""
+        client_id = request.match_info["id"]
+
+        # Per-client last image falls back to global (None key)
+        raw = server._last_image
+        if isinstance(raw, dict):
+            image_bytes = raw.get(client_id) or raw.get(None)
+        else:
+            image_bytes = raw
+
+        if not image_bytes:
+            return web.Response(status=404, text=f"No image data available for client {client_id!r}")
+
+        return web.Response(body=image_bytes, content_type="image/png")
+
     async def api_connect_client(request: web.Request) -> web.Response:
         """POST /api/clients/{id}/connect — force (re)connect to a discovered client."""
         client_id = request.match_info["id"]
@@ -545,6 +561,7 @@ async def run(
     app.router.add_post("/api/clients/{id}/palette", api_set_client_palette)
     app.router.add_post("/api/clients/{id}/interval", api_set_client_interval)
     app.router.add_post("/api/clients/{id}/connect", api_connect_client)
+    app.router.add_get("/api/clients/{id}/debug-image", api_get_client_debug_image)
     app.router.add_delete("/api/clients/{id}", api_delete_client)
 
     runner = web.AppRunner(app)

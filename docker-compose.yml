@@ -1,10 +1,9 @@
-version: "3.8"
-
 services:
   sendspin-image-server:
-    image: sendspin-image-server:latest
+    build: .
     container_name: sendspin-image-server
     restart: unless-stopped
+    network_mode: host
     ports:
       - "8927:8927" # WebSocket
       - "8928:8928" # HTTP/UI
@@ -16,14 +15,4 @@ services:
 
 volumes:
   sendspin-images:
-    driver: local
-    driver_opts:
-      type: none
-      device: /home/vantreeseba/code/vantreeseba/home_automation/sendspin-image-server/images
-      o: bind
   sendspin-data:
-    driver: local
-    driver_opts:
-      type: none
-      device: /home/vantreeseba/code/vantreeseba/home_automation/sendspin-image-server/data
-      o: bind
