@@ -41,7 +41,7 @@ class SendspinImageServer:
         self._server_name = server_name
         self._clients: dict[str, ClientState] = {}
         self._ws_server: WebSocketServer | None = None
-        self._last_image: bytes | None = None
+        self._last_image: dict[str | None, bytes | None] = {None: None}
         self._last_image_channel: int = 0
         # url → task for server-initiated outbound connections
         self._outbound_tasks: dict[str, asyncio.Task[None]] = {}
@@ -58,8 +58,11 @@ class SendspinImageServer:
 
     @property
     def last_image(self) -> bytes | None:
-        """The most recently broadcast image bytes, or None if none sent yet."""
-        return self._last_image
+        """The most recently broadcast image bytes (global buffer), or None if none sent yet."""
+        last_image = self._last_image
+        if isinstance(last_image, dict):
+            return last_image.get(None)
+        return last_image
 
     @property
     def clients(self) -> dict[str, ClientState]:
@@ -69,7 +72,6 @@ class SendspinImageServer:
     @property
     def registry(self) -> EndpointRegistry | None:
         """The endpoint registry, if wired up."""
-        return self._registry
 
     @registry.setter
     def registry(self, value: EndpointRegistry) -> None:
@@ -213,7 +215,7 @@ class SendspinImageServer:
         *dither_palette* selects the colour palette used.
         Dithering always happens after per-client resizing.
         """
-        self._last_image = image_bytes
+        self._last_image[None] = image_bytes
         self._last_image_channel = channel
         artwork_clients = [c for c in self._clients.values() if c.has_artwork and c.stream_started]
         if not artwork_clients:
@@ -231,9 +233,12 @@ class SendspinImageServer:
             ),
             return_exceptions=True,
         )
+        # Track post-dither message bytes per client for debug endpoints
         for client, result in zip(artwork_clients, results):
             if isinstance(result, Exception):
                 logger.warning("Failed to push image to %s: %s", client.client_id, result)
+            else:
+                self._last_image[client.client_id] = result
 
     # ------------------------------------------------------------------
     # WebSocket handler
@@ -304,9 +309,9 @@ class SendspinImageServer:
             client.stream_started = True
 
             # Step 3b: immediately send last known image to new artwork clients
-            if client.has_artwork and self._last_image is not None:
+            if client.has_artwork and self.last_image is not None:
                 try:
-                    await push_image_to_client(client, self._last_image, self._last_image_channel)
+                    await push_image_to_client(client, self.last_image, self._last_image_channel)
                 except Exception as exc:
                     logger.warning(
                         "Failed to push cached image to new client %s: %s",
@@ -527,9 +532,9 @@ class SendspinImageServer:
         await self._send_stream_start(client)
 
         # Per spec: after stream/start in response to stream/request-format, send immediate artwork update
-        if client.has_artwork and self._last_image is not None:
+        if client.has_artwork and self.last_image is not None:
             try:
-                await push_image_to_client(client, self._last_image, self._last_image_channel)
+                await push_image_to_client(client, self.last_image, self._last_image_channel)
             except Exception as exc:
                 logger.warning(
                     "Failed to push cached image after format request for %s: %s",

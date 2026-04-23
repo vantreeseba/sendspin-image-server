@@ -744,7 +744,7 @@ async def _push(
     from sendspin_image_server.stream import push_image_to_client
 
     force_dither = dither_algo != _NO_DITHER_SENTINEL and dither_palette != "none"
-    await push_image_to_client(
+    sent_bytes = push_image_to_client(
         client,
         data,
         0,
@@ -752,3 +752,6 @@ async def _push(
         dither_algo=dither_algo if force_dither else "none",
         dither_palette=dither_palette if force_dither else "e6",
     )
+    # Track per-client image for debug endpoints
+    if sent_bytes is not None:
+        server._last_image[client.client_id] = sent_bytes

@@ -83,7 +83,7 @@ async def push_image_to_client(
     force_e6_dither: bool = False,
     dither_algo: DitheringAlgo = "floyd-steinberg",
     dither_palette: DitheringPalette = "e6",
-) -> None:
+) -> bytes | None:
     """Send an artwork binary message to a single client.
 
     Per the Sendspin spec, the image is resized to fit within the dimensions
@@ -93,44 +93,52 @@ async def push_image_to_client(
     *force_e6_dither* is True, dithering to the chosen palette is applied
     after resizing (always post-resize, never before).
     """
+    # Guard: if channel is out of range, return early (nothing was sent)
+    if channel < 0 or channel >= len(client.artwork_channels):
+        logger.debug(
+            "Channel %d out of range for client %s (%d channels), returning",
+            channel, client.client_id, len(client.artwork_channels),
+        )
+        return None
+
     loop = asyncio.get_event_loop()
 
-    if 0 <= channel < len(client.artwork_channels):
-        ch = client.artwork_channels[channel]
+    ch = client.artwork_channels[channel]
 
-        # Resize to the client's requested dimensions (only if declared)
-        if ch.media_width is not None and ch.media_height is not None:
-            image_bytes = await loop.run_in_executor(
-                None, _resize_for_channel, image_bytes, ch.media_width, ch.media_height
-            )
+    # Resize to the client's requested dimensions (only if declared)
+    if ch.media_width is not None and ch.media_height is not None:
+        image_bytes = await loop.run_in_executor(
+            None, _resize_for_channel, image_bytes, ch.media_width, ch.media_height
+        )
 
-        # Determine output format from the channel's declared format.
-        # 'e6-dithered' is a processing directive, not a container format;
-        # it encodes the result as JPEG.  Unknown values fall back to JPEG.
-        fmt_map = {"jpeg": "JPEG", "png": "PNG", "bmp": "BMP", "e6-dithered": "JPEG"}
-        output_format = fmt_map.get(ch.format.lower(), "JPEG")
+    # Determine output format from the channel's declared format.
+    # 'e6-dithered' is a processing directive, not a container format;
+    # it encodes the result as JPEG.  Unknown values fall back to JPEG.
+    fmt_map = {"jpeg": "JPEG", "png": "PNG", "bmp": "BMP", "e6-dithered": "JPEG"}
+    output_format = fmt_map.get(ch.format.lower(), "JPEG")
 
-        # Apply dithering if requested by client or forced by caller
-        if ch.wants_e6_dither or force_e6_dither:
-            logger.debug(
-                "Applying dithering (algo=%s, palette=%s) for client %s channel %d → %s",
-                dither_algo, dither_palette, client.client_id, channel, output_format,
-            )
-            image_bytes = await loop.run_in_executor(
-                None, floyd_steinberg_e6, image_bytes, dither_algo, output_format, dither_palette
-            )
-        else:
-            # Re-encode to the client's requested format even without dithering
-            def _reencode(data: bytes, fmt: str) -> bytes:
-                from PIL import Image as _Image
-                import io as _io
-                img = _Image.open(_io.BytesIO(data)).convert("RGB")
-                return encode_pil(img, fmt)
+    # Apply dithering if requested by client or forced by caller
+    if ch.wants_e6_dither or force_e6_dither:
+        logger.debug(
+            "Applying dithering (algo=%s, palette=%s) for client %s channel %d → %s",
+            dither_algo, dither_palette, client.client_id, channel, output_format,
+        )
+        image_bytes = await loop.run_in_executor(
+            None, floyd_steinberg_e6, image_bytes, dither_algo, output_format, dither_palette
+        )
+    else:
+        # Re-encode to the client's requested format even without dithering
+        def _reencode(data: bytes, fmt: str) -> bytes:
+            from PIL import Image as _Image
+            import io as _io
+            img = _Image.open(_io.BytesIO(data)).convert("RGB")
+            return encode_pil(img, fmt)
 
-            image_bytes = await loop.run_in_executor(
-                None, _reencode, image_bytes, output_format
-            )
+        image_bytes = await loop.run_in_executor(
+            None, _reencode, image_bytes, output_format
+        )
 
     ts = server_time_us()
     msg = build_artwork_message(channel, ts, image_bytes)
     await client.websocket.send(msg)
+    return msg

@@ -482,17 +482,29 @@ async def run(
         """GET /api/clients/{id}/debug-image — return the last image pushed to a client."""
         client_id = request.match_info["id"]
 
-        # Per-client last image falls back to global (None key)
-        raw = server._last_image
-        if isinstance(raw, dict):
-            image_bytes = raw.get(client_id) or raw.get(None)
+        last_image = getattr(server, "_last_image", None)
+
+        # Handle both legacy scalar bytes and new dict format
+        image_bytes: bytes | None
+        if isinstance(last_image, dict):
+            # New format: dict of client images keyed by client_id (or None for global)
+            image_bytes = last_image.get(client_id) or last_image.get(None)
+        elif isinstance(last_image, bytes):
+            # Legacy: raw bytes
+            image_bytes = last_image
         else:
-            image_bytes = raw
+            image_bytes = None
 
         if not image_bytes:
-            return web.Response(status=404, text=f"No image data available for client {client_id!r}")
+            return web.Response(
+                status=404,
+                content=f"No image data available for client {client_id!r}",
+            )
 
-        return web.Response(body=image_bytes, content_type="image/png")
+        return web.Response(
+            content=image_bytes,
+            media_type="image/png",
+        )
 
     async def api_connect_client(request: web.Request) -> web.Response:
         """POST /api/clients/{id}/connect — force (re)connect to a discovered client."""
