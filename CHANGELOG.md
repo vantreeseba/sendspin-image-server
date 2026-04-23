@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v1.8.0 (2026-04-23)
+
+### Features
+
+- Forcing release of previous.
+  ([`3e762c4`](https://github.com/vantreeseba/sendspin-image-server/commit/3e762c40d9e5ad4fd7653282ef22765352d549e6))
+
+### Refactoring
+
+- **dither**: Fix floyd-steinberg palettes, add client debug preview, fix docker mDNS crash
+  ([`85a89b8`](https://github.com/vantreeseba/sendspin-image-server/commit/85a89b8d5867c9e1078580ea5422587154a2b218))
+
+
 ## v1.7.1 (2026-04-22)
 
 
