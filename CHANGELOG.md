@@ -2,6 +2,25 @@
 
 <!-- version list -->
 
+## v1.9.0 (2026-04-27)
+
+### Features
+
+- Release new version
+  ([`d47589c`](https://github.com/vantreeseba/sendspin-image-server/commit/d47589c488de869528fc6461059d14fa5aa34fed))
+
+- Release new version
+  ([`d2558dc`](https://github.com/vantreeseba/sendspin-image-server/commit/d2558dc54d53f7e805aa51499706967281a94006))
+
+### Refactoring
+
+- Rename floyd_steinberg_e6 → dither_to_bytes for clarity
+  ([`2042b85`](https://github.com/vantreeseba/sendspin-image-server/commit/2042b85b2e28448c83658a6a9cd60bfb1385bee7))
+
+- Split EndpointRegistry into assignments module
+  ([`3062d07`](https://github.com/vantreeseba/sendspin-image-server/commit/3062d0768c11ae95f1b476aadb3449d112e57473))
+
+
 ## v1.8.2 (2026-04-23)
 
 ### Bug Fixes
