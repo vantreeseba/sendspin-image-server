@@ -72,6 +72,7 @@ class SendspinImageServer:
     @property
     def registry(self) -> EndpointRegistry | None:
         """The endpoint registry, if wired up."""
+        return self._registry
 
     @registry.setter
     def registry(self, value: EndpointRegistry) -> None:
