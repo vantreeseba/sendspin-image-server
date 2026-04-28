@@ -96,6 +96,9 @@ warn_unused_configs = true
 warn_unused_ignores = true
 packages = ["sendspin_image_server"]
 
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
 [tool.semantic_release]
 version_toml = ["pyproject.toml:project.version"]
 branch = "main"
