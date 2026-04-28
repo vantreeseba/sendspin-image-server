@@ -96,7 +96,7 @@ async def run(
         path=_BUILTIN_LOCAL_PATH,
         endpoint_id=_BUILTIN_LOCAL_ENDPOINT_ID,
     )
-    registry.add_endpoint(builtin, make_default=True, _persist=False)
+    await registry.add_endpoint(builtin, make_default=True, _persist=False)
 
     # Restore previously saved endpoints + assignments from DB
     await registry.restore_from_db(builtin_endpoint_id=_BUILTIN_LOCAL_ENDPOINT_ID)
@@ -261,7 +261,7 @@ async def run(
                 text=f"Unknown kind: {kind!r}. Must be 'local', 'immich', or 'homeassistant'",
             )
 
-        registry.add_endpoint(ep)
+        await registry.add_endpoint(ep)
         d = ep.to_dict()
         d["builtin"] = False
         d["is_default"] = ep.endpoint_id == registry.default_endpoint_id
@@ -272,7 +272,7 @@ async def run(
         endpoint_id = request.match_info["id"]
         if endpoint_id == _BUILTIN_LOCAL_ENDPOINT_ID:
             return web.Response(status=403, text="Cannot delete built-in endpoint")
-        removed = registry.remove_endpoint(endpoint_id)
+        removed = await registry.remove_endpoint(endpoint_id)
         if not removed:
             return web.Response(status=404, text=f"Endpoint {endpoint_id!r} not found")
         return web.Response(status=204)
@@ -325,7 +325,7 @@ async def run(
             dither_palette=dither_palette,
             interval=interval,
         )
-        registry.add_device_preset(preset)
+        await registry.add_device_preset(preset)
         return web.Response(
             status=201, content_type="application/json", text=json.dumps(preset.to_dict())
         )
@@ -333,7 +333,7 @@ async def run(
     async def api_delete_device_preset(request: web.Request) -> web.Response:
         """DELETE /api/device-presets/{id}."""
         preset_id = request.match_info["id"]
-        removed = registry.remove_device_preset(preset_id)
+        removed = await registry.remove_device_preset(preset_id)
         if not removed:
             return web.Response(status=404, text=f"Preset {preset_id!r} not found")
         return web.Response(status=204)
