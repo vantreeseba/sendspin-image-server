@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.16.4 (2026-04-28)
+
+### Bug Fixes
+
+- **dither**: Restore wire-remapping with correct 5-colour calibrated palette
+  ([`a323215`](https://github.com/vantreeseba/sendspin-image-server/commit/a32321596ba45ea5b499b7fad1e2f2f9e251c0d9))
+
+
 ## v1.16.3 (2026-04-28)
 
 
