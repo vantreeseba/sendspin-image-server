@@ -69,14 +69,56 @@ export default function App() {
           <h2 className="font-semibold text-muted-foreground text-xs uppercase tracking-wider">
             Clients
           </h2>
-          {!clients || clients.length === 0 ? (
+          {!clients ? (
+            <p className="text-muted-foreground text-sm">Loading…</p>
+          ) : clients.length === 0 ? (
             <p className="text-muted-foreground text-sm">No clients discovered.</p>
           ) : (
-            <div className="grid gap-3 sm:grid-cols-2">
-              {clients.map((c) => (
-                <ClientCard key={c.id} client={c} endpoints={endpoints ?? []} onChanged={refresh} />
-              ))}
-            </div>
+            (() => {
+              const connected = clients.filter((c) => c.status === 'connected');
+              const offline = clients.filter((c) => !c.discovered_only && c.status !== 'connected');
+              const discovered = clients.filter((c) => c.discovered_only);
+              return (
+                <div className="space-y-5">
+                  {connected.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-[11px] font-medium uppercase tracking-wider text-green-500/80">
+                        Active ({connected.length})
+                      </p>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {connected.map((c) => (
+                          <ClientCard key={c.id} client={c} endpoints={endpoints ?? []} onChanged={refresh} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {offline.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-[11px] font-medium uppercase tracking-wider text-amber-500/80">
+                        Disconnected ({offline.length})
+                      </p>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {offline.map((c) => (
+                          <ClientCard key={c.id} client={c} endpoints={endpoints ?? []} onChanged={refresh} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {discovered.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
+                        Discovered ({discovered.length})
+                      </p>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {discovered.map((c) => (
+                          <ClientCard key={c.id} client={c} endpoints={endpoints ?? []} onChanged={refresh} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()
           )}
         </section>
 

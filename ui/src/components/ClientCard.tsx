@@ -163,8 +163,15 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
 
   const intervalLabel = client.interval > 0 ? `${client.interval}s` : 'default';
 
+  const cardClass =
+    client.status === 'connected'
+      ? 'border-l-4 border-l-green-600'
+      : isDiscovered
+        ? 'opacity-60'
+        : 'border-l-4 border-l-amber-600/60 opacity-60';
+
   return (
-    <Card className={isDiscovered ? 'opacity-60' : undefined}>
+    <Card className={cardClass}>
       <CardHeader>
         <div className="flex items-center justify-between gap-2">
           <CardTitle className="truncate text-lg">{client.name || client.id}</CardTitle>
