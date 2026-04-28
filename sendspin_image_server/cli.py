@@ -23,6 +23,7 @@ from sendspin_image_server.dither import (
     dither_to_pil,
 )
 from sendspin_image_server.endpoints import (
+    CalibrationEndpoint,
     HomeAssistantEndpoint,
     ImmichEndpoint,
     LocalFolderEndpoint,
@@ -255,10 +256,12 @@ async def run(
                 token=token,
                 media_content_id=media_content_id,
             )
+        elif kind == "calibration":
+            ep = CalibrationEndpoint(name=ep_name)
         else:
             return web.Response(
                 status=400,
-                text=f"Unknown kind: {kind!r}. Must be 'local', 'immich', or 'homeassistant'",
+                text=f"Unknown kind: {kind!r}. Must be 'local', 'immich', 'homeassistant', or 'calibration'",
             )
 
         await registry.add_endpoint(ep)

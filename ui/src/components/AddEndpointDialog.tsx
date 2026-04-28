@@ -24,7 +24,7 @@ interface Props {
   onAdded: () => void;
 }
 
-type Kind = 'immich' | 'local' | 'homeassistant';
+type Kind = 'immich' | 'local' | 'homeassistant' | 'calibration';
 
 export function AddEndpointDialog({ open, onClose, onAdded }: Props) {
   const [kind, setKind] = useState<Kind>('immich');
@@ -70,6 +70,8 @@ export function AddEndpointDialog({ open, onClose, onAdded }: Props) {
         body = { kind: 'local', name, path };
       } else if (kind === 'immich') {
         body = { kind: 'immich', name, base_url: baseUrl, album_id: albumId, api_key: apiKey };
+      } else if (kind === 'calibration') {
+        body = { kind: 'calibration', name };
       } else {
         body = {
           kind: 'homeassistant',
@@ -106,6 +108,7 @@ export function AddEndpointDialog({ open, onClose, onAdded }: Props) {
                 <SelectItem value="immich">Immich</SelectItem>
                 <SelectItem value="homeassistant">Home Assistant</SelectItem>
                 <SelectItem value="local">Local folder</SelectItem>
+                <SelectItem value="calibration">Calibration chart</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -168,6 +171,15 @@ export function AddEndpointDialog({ open, onClose, onAdded }: Props) {
                 />
               </div>
             </>
+          )}
+
+          {kind === 'calibration' && (
+            <p className="text-muted-foreground text-xs">
+              Displays a 6-block colour chart — one solid block per e-paper ink colour — labelled
+              with name, RGB values, and the ESPHome nibble value. Assign a client to this
+              endpoint and observe the physical display to determine whether each ink maps
+              correctly.
+            </p>
           )}
 
           {kind === 'homeassistant' && (

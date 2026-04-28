@@ -117,7 +117,12 @@ export type NewHomeAssistantEndpoint = {
   token: string;
   media_content_id: string;
 };
-export type NewEndpoint = NewLocalEndpoint | NewImmichEndpoint | NewHomeAssistantEndpoint;
+export type NewCalibrationEndpoint = { kind: 'calibration'; name: string };
+export type NewEndpoint =
+  | NewLocalEndpoint
+  | NewImmichEndpoint
+  | NewHomeAssistantEndpoint
+  | NewCalibrationEndpoint;
 
 export async function addEndpoint(body: NewEndpoint): Promise<Endpoint> {
   const r = await fetch(`${BASE}/api/endpoints`, {

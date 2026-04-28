@@ -51,7 +51,7 @@ export interface Client {
 export interface Endpoint {
   id: string;
   name: string;
-  kind: 'local' | 'immich' | 'homeassistant';
+  kind: 'local' | 'immich' | 'homeassistant' | 'calibration';
   builtin: boolean;
   is_default: boolean;
   // local

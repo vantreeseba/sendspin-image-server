@@ -11,6 +11,9 @@ Concrete implementations
 - ``ImmichEndpoint``            — fetches in-order from an Immich album via REST
 - ``HomeAssistantEndpoint``     — browses the HA Media Browser at a given path
                                   and downloads images via the REST API
+- ``CalibrationEndpoint``       — generates a solid-colour test chart for each of
+                                  the 6 e-paper palette colours; use this to verify
+                                  that each colour maps to the correct physical ink
 """
 
 from __future__ import annotations
@@ -23,7 +26,7 @@ import uuid
 from abc import ABC, abstractmethod
 from typing import Any
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 logger = logging.getLogger(__name__)
 
@@ -368,3 +371,106 @@ class HomeAssistantEndpoint(ImageEndpoint):
             "base_url": self.base_url,
             "media_content_id": self.media_content_id,
         }
+
+
+# ---------------------------------------------------------------------------
+# Calibration chart
+# ---------------------------------------------------------------------------
+
+# ESPHome epaper_spi Spectra-E6 color_to_hex() nibble assignments (from source):
+#   enum E6Color { BLACK=0, WHITE=1, YELLOW=2, RED=3, SKIP_1=4, BLUE=5, GREEN=6 }
+# Standard ACeP hardware expects: 0=Black,1=White,2=Green,3=Blue,4=Red,5=Yellow,6=Orange
+# Whether those match depends on the init_sequence programmed into the display.
+_CALIBRATION_ENTRIES: list[tuple[str, tuple[int, int, int], int, str]] = [
+    # (label, rgb, esphome_nibble, std_acep_at_that_nibble)
+    ("BLACK",  (0,   0,   0),   0, "Black"),
+    ("WHITE",  (255, 255, 255), 1, "White"),
+    ("GREEN",  (0,   255, 0),   6, "Orange?"),
+    ("BLUE",   (0,   0,   255), 5, "Yellow?"),
+    ("RED",    (255, 0,   0),   3, "Blue?"),
+    ("YELLOW", (255, 255, 0),   2, "Green?"),
+]
+
+
+def _build_calibration_image() -> bytes:
+    """Render a 480×800 colour chart for each e6 palette entry.
+
+    Each block shows:
+      - Colour name (intended)
+      - RGB values being sent
+      - ESPHome nibble that color_to_hex() produces for that RGB
+      - What the standard ACeP hardware maps that nibble to
+
+    Observe the physical display to determine whether the ESPHome init_sequence
+    maps nibbles the same way as the E6Color enum (correct) or the standard
+    ACeP ordering (scrambled).
+    """
+    W, H = 480, 800
+    COLS, ROWS = 2, 3
+    BW = W // COLS          # 240
+    BH = H // ROWS          # 266 (last row absorbs remainder)
+
+    img = Image.new("RGB", (W, H))
+    draw = ImageDraw.Draw(img)
+
+    try:
+        font_lg = ImageFont.load_default(size=22)
+        font_sm = ImageFont.load_default(size=13)
+    except TypeError:
+        font_lg = ImageFont.load_default()
+        font_sm = font_lg
+
+    for i, (label, rgb, nibble, std_label) in enumerate(_CALIBRATION_ENTRIES):
+        col, row = i % COLS, i // COLS
+        x0 = col * BW
+        y0 = row * BH
+        x1 = x0 + BW
+        y1 = (y0 + BH) if row < ROWS - 1 else H
+
+        draw.rectangle([x0, y0, x1 - 1, y1 - 1], fill=rgb)
+
+        # Thin 1-px separator lines
+        draw.line([x0, y0, x1, y0], fill=(80, 80, 80), width=1)
+        draw.line([x0, y0, x0, y1], fill=(80, 80, 80), width=1)
+
+        # Text contrast
+        lum = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]
+        tc = (0, 0, 0) if lum > 140 else (255, 255, 255)
+
+        cx = (x0 + x1) // 2
+        cy = (y0 + y1) // 2
+
+        draw.text((cx, cy - 38), label,              fill=tc, font=font_lg, anchor="mm")
+        draw.text((cx, cy - 10), f"RGB{rgb}",        fill=tc, font=font_sm, anchor="mm")
+        draw.text((cx, cy + 10), f"nibble → {nibble}", fill=tc, font=font_sm, anchor="mm")
+        draw.text((cx, cy + 28), f"std ACeP: {std_label}", fill=tc, font=font_sm, anchor="mm")
+
+    buf = _io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+class CalibrationEndpoint(ImageEndpoint):
+    """Generates a colour-calibration chart for diagnosing e-paper ink mapping.
+
+    Displays six solid-colour blocks (one per e6 palette entry) labelled with
+    the colour name, RGB values, the ESPHome nibble that color_to_hex() produces,
+    and what the standard ACeP hardware maps that nibble to.
+
+    Assign a client to this endpoint, observe the physical display, and note
+    which physical ink appears for each labelled block.  This reveals whether
+    the ESPHome init_sequence maps nibbles the same way as the E6Color enum.
+    """
+
+    def __init__(self, name: str = "Calibration", endpoint_id: str | None = None) -> None:
+        super().__init__(endpoint_id or str(uuid.uuid4()), name)
+        self._cached: bytes | None = None
+
+    @property
+    def kind(self) -> str:
+        return "calibration"
+
+    async def fetch_next(self) -> bytes:
+        if self._cached is None:
+            self._cached = _build_calibration_image()
+        return self._cached

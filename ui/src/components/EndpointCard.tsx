@@ -14,6 +14,7 @@ const KIND_LABELS: Record<Endpoint['kind'], string> = {
   local: 'Local folder',
   immich: 'Immich',
   homeassistant: 'Home Assistant',
+  calibration: 'Calibration',
 };
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {

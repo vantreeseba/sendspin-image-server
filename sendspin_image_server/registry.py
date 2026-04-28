@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from sendspin_image_server.assignments import ClientAssignmentManager
 from sendspin_image_server.dither import DitheringAlgo, DitheringPalette
 from sendspin_image_server.endpoints import (
+    CalibrationEndpoint,
     HomeAssistantEndpoint,
     ImmichEndpoint,
     ImageEndpoint,
@@ -315,6 +316,8 @@ class EndpointRegistry:
                     media_content_id=cfg.get("media_content_id", "media-source://media_source"),
                     endpoint_id=eid,
                 )
+            elif kind == "calibration":
+                ep = CalibrationEndpoint(name=name, endpoint_id=eid)
             else:
                 logger.warning("Unknown endpoint kind %r in DB, skipping id=%s", kind, eid)
                 continue
@@ -391,5 +394,7 @@ def endpoint_to_config(ep: ImageEndpoint) -> dict[str, Any]:
             "token": ep.token,
             "media_content_id": ep.media_content_id,
         }
+    if ep.kind == "calibration":
+        return {}
     d = ep.to_dict()
     return {k: v for k, v in d.items() if k not in ("id", "kind", "name")}
