@@ -55,42 +55,17 @@ BW_PALETTE_RGB: Final[list[tuple[int, int, int]]] = [
     (255, 255, 255),  # 1 White
 ]
 
-# Calibration result (ESPHome epaper_spi Spectra-E6, verified on hardware):
-#   ESPHome nibble → physical ink on device
-#   0 → Black,  1 → White,  2 → Red,  3 → Blue,  5 → Green,  6 → Orange/Red
-#   Nibble 4 (SKIP_1 in E6Color enum) is unreachable — Yellow ink is not accessible.
-#
-# Two-palette approach:
-#   PALETTE_RGB  — perceptual dithering targets (physical ink colours for Lab ΔE²)
-#   WIRE_RGB     — wire-format colours that produce correct nibbles via color_to_hex()
-#
-# After dithering with PALETTE_RGB, each output pixel is remapped to its
-# corresponding WIRE_RGB entry before encoding the PNG.
+# Pure Waveshare primary/secondary palette — the same values used by Waveshare's
+# official epd7in3f.py getbuffer() method.  The Sendspin ESPHome component maps
+# these exact RGB values to the correct physical ink indices via colour lookup,
+# so the dithered output pixels must be exactly these values.
 E6_PALETTE_RGB: Final[list[tuple[int, int, int]]] = [
-    (0,   0,   0),    # 0 Black   — physical ink
-    (255, 255, 255),  # 1 White   — physical ink
-    (178, 19,  24),   # 2 Red ink — physical measurement
-    (33,  87,  186),  # 3 Blue ink — physical measurement
-    (0,   155, 0),    # 4 Green ink — threshold-adjusted for ESPHome G>127 requirement
-]
-
-# Wire-format palette: RGB values that pass through ESPHome's color_to_hex()
-# to produce the correct 4-bit nibble for each ink.
-#   (255,255,0) → YELLOW zone → nibble 2 → Red ink
-#   (255,0,0)   → RED zone    → nibble 3 → Blue ink
-#   (0,0,255)   → BLUE zone   → nibble 5 → Green ink
-#
-# Note: nibble 4 (SKIP_1) and nibble 6 (GREEN zone → Orange/weird-red ink) are
-# intentionally excluded. Yellow ink (nibble 4) is unreachable through color_to_hex().
-# Nibble 6 shows as a reddish colour indistinguishable from nibble 2, so including
-# it just routes yellow/warm source areas to a second red, making yellows look red.
-# Without it, yellow source pixels fall to Green (Lab-nearest) which is more neutral.
-E6_WIRE_RGB: Final[list[tuple[int, int, int]]] = [
-    (0,   0,   0),    # nibble 0 → Black
-    (255, 255, 255),  # nibble 1 → White
-    (255, 255, 0),    # nibble 2 → Red ink
-    (255, 0,   0),    # nibble 3 → Blue ink
-    (0,   0,   255),  # nibble 5 → Green ink
+    (0,   0,   0),    # 0 Black
+    (255, 255, 255),  # 1 White
+    (0,   255, 0),    # 2 Green
+    (0,   0,   255),  # 3 Blue
+    (255, 0,   0),    # 4 Red
+    (255, 255, 0),    # 5 Yellow
 ]
 
 PALETTE_RGB: Final[dict[str, list[tuple[int, int, int]]]] = {
@@ -98,20 +73,11 @@ PALETTE_RGB: Final[dict[str, list[tuple[int, int, int]]]] = {
     "e6": E6_PALETTE_RGB,
 }
 
-# Wire-format palettes — these are what actually appear in the output PNG pixels.
-WIRE_RGB: Final[dict[str, list[tuple[int, int, int]]]] = {
-    "bw": BW_PALETTE_RGB,   # BW needs no remapping
-    "e6": E6_WIRE_RGB,
-}
-
-# Output-pixel sets are derived from WIRE_RGB (not PALETTE_RGB) because the PNG
-# contains wire-format colours, not dithering-target colours.
-E6_WIRE_SET: Final[frozenset[tuple[int, int, int]]] = frozenset(map(tuple, E6_WIRE_RGB))
-E6_PALETTE_SET: Final[frozenset[tuple[int, int, int]]] = E6_WIRE_SET  # backwards compat
+E6_PALETTE_SET: Final[frozenset[tuple[int, int, int]]] = frozenset(map(tuple, E6_PALETTE_RGB))
 BW_PALETTE_SET: Final[frozenset[tuple[int, int, int]]] = frozenset(map(tuple, BW_PALETTE_RGB))
 PALETTE_SETS: Final[dict[str, frozenset[tuple[int, int, int]]]] = {
     "bw": BW_PALETTE_SET,
-    "e6": E6_WIRE_SET,
+    "e6": E6_PALETTE_SET,
 }
 
 DitheringAlgo = Literal["none", "floyd-steinberg", "floyd-steinberg-serpentine", "atkinson", "ordered"]
@@ -200,28 +166,13 @@ _LUTS: Final[dict[str, np.ndarray]] = {
 _PAL_NPS: Final[dict[str, np.ndarray]] = {
     name: np.array(rgb, dtype=np.uint8) for name, rgb in PALETTE_RGB.items()
 }
-_WIRE_NPS: Final[dict[str, np.ndarray]] = {
-    name: np.array(rgb, dtype=np.uint8) for name, rgb in WIRE_RGB.items()
-}
 
 
 def _nearest(r: int, g: int, b: int, palette: DitheringPalette) -> tuple[int, int, int]:
-    """Return the wire-format RGB for the perceptually closest palette entry.
-
-    The LUT is built from PALETTE_RGB (physical ink colours) for accurate
-    Lab-space nearest-neighbour, but the returned RGB is the corresponding
-    WIRE_RGB entry — the value that produces the correct ESPHome nibble.
-    """
+    """Return the palette RGB colour closest to (r, g, b) via LUT."""
     idx = int(_LUTS[palette][r >> _LUT_SHIFT, g >> _LUT_SHIFT, b >> _LUT_SHIFT])
-    wire = _WIRE_NPS[palette][idx]
-    return int(wire[0]), int(wire[1]), int(wire[2])
-
-
-def _nearest_target(r: int, g: int, b: int, palette: DitheringPalette) -> tuple[int, int, int]:
-    """Return the perceptual dithering-target RGB (used for error-diffusion arithmetic)."""
-    idx = int(_LUTS[palette][r >> _LUT_SHIFT, g >> _LUT_SHIFT, b >> _LUT_SHIFT])
-    pal = _PAL_NPS[palette][idx]
-    return int(pal[0]), int(pal[1]), int(pal[2])
+    rgb = _PAL_NPS[palette][idx]
+    return int(rgb[0]), int(rgb[1]), int(rgb[2])
 
 
 # ---------------------------------------------------------------------------
@@ -237,31 +188,17 @@ def _preprocess(img: Image.Image) -> Image.Image:
 
 
 def _pil_floyd_steinberg(img: Image.Image, palette: DitheringPalette) -> Image.Image:
-    """Floyd-Steinberg dithering via PIL's built-in C quantize(), with wire remapping.
+    """Floyd-Steinberg dithering via PIL's built-in C quantize().
 
-    Step 1: dither using PALETTE_RGB (physical ink colours) as targets so that
-    PIL's Lab-equivalent RGB nearest-neighbour assigns pixels perceptually correctly.
-
-    Step 2: swap the palette to WIRE_RGB before converting back to RGB, so that
-    each output pixel contains the wire-format colour that produces the correct
-    ESPHome nibble → correct physical ink on the display.
+    Mirrors Waveshare's official getbuffer() approach: quantise to the exact
+    palette colours so the output pixels are pixel-perfect Waveshare values.
     """
-    perceptual_colors = PALETTE_RGB[palette]
-    wire_colors = WIRE_RGB[palette]
-
+    colors = PALETTE_RGB[palette]
     pal_img = Image.new("P", (1, 1))
-    flat = [v for c in perceptual_colors for v in c]
+    flat = [v for c in colors for v in c]
     flat += [0] * (768 - len(flat))
     pal_img.putpalette(flat)
-
-    quantized = img.quantize(palette=pal_img, dither=Image.Dither.FLOYDSTEINBERG)
-
-    # Remap palette indices to wire-format colours (indices unchanged, RGB values swapped)
-    wire_flat = [v for c in wire_colors for v in c]
-    wire_flat += [0] * (768 - len(wire_flat))
-    quantized.putpalette(wire_flat)
-
-    return quantized.convert("RGB")
+    return img.quantize(palette=pal_img, dither=Image.Dither.FLOYDSTEINBERG).convert("RGB")
 
 
 def _atkinson(img: Image.Image, palette: DitheringPalette) -> Image.Image:
@@ -285,12 +222,10 @@ def _atkinson(img: Image.Image, palette: DitheringPalette) -> Image.Image:
     for y in range(h):
         for x in range(w):
             cr, cg, cb = get(x, y)
-            # Wire colour for output; dithering target for error calculation
             pr, pg, pb = _nearest(cr, cg, cb, palette)
-            tr, tg, tb = _nearest_target(cr, cg, cb, palette)
             o = (y * w + x) * 3
             out[o], out[o + 1], out[o + 2] = pr, pg, pb
-            er, eg, eb = (cr - tr) >> 3, (cg - tg) >> 3, (cb - tb) >> 3
+            er, eg, eb = (cr - pr) >> 3, (cg - pg) >> 3, (cb - pb) >> 3
             add_err(x + 1, y,     er, eg, eb)
             add_err(x + 2, y,     er, eg, eb)
             add_err(x - 1, y + 1, er, eg, eb)
