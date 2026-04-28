@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.10.1 (2026-04-28)
+
+### Bug Fixes
+
+- Await CRUD methods in CLI and Docker logs clean
+  ([`5f0e2bb`](https://github.com/vantreeseba/sendspin-image-server/commit/5f0e2bba1070df2089564c2c5ae5effec010631b))
+
+
 ## v1.10.0 (2026-04-27)
 
 ### Features
