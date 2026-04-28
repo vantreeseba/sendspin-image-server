@@ -147,23 +147,18 @@ class TestPaletteEsphomeZones:
         # (0,0,255) → BLUE zone → nibble 5 → Green ink on display
         assert esphome_ink_index(*E6_WIRE_RGB[4]) == INK_BLUE
 
-    def test_orange_ink_wire_maps_to_green_nibble(self):
-        # (0,255,0) → GREEN zone → nibble 6 → Orange ink on display
-        assert esphome_ink_index(*E6_WIRE_RGB[5]) == INK_GREEN
-
-    def test_no_wire_colour_maps_to_orange_nibble(self):
-        """nibble 6 is used for Orange ink; no wire colour should hit the
-        Orange enum entry unexpectedly (it's intentionally used for Green zone)."""
+    def test_no_wire_colour_maps_to_orange_or_green_nibble(self):
+        """nibble 6 (weird-red ink) is intentionally excluded from the palette."""
         for color in E6_WIRE_RGB:
             ink = esphome_ink_index(*color)
-            assert ink != INK_ORANGE, (
-                f"Wire colour {color} unexpectedly maps to INK_ORANGE (nibble 6+)"
+            assert ink not in (INK_ORANGE, INK_GREEN), (
+                f"Wire colour {color} maps to excluded nibble {ink}"
             )
 
     def test_all_required_nibbles_produced(self):
-        """Wire colours must produce nibbles 0,1,2,3,5,6 (no nibble 4 — unreachable)."""
+        """Wire colours must produce nibbles 0,1,2,3,5 (4 and 6 excluded)."""
         nibbles = {esphome_ink_index(*c) for c in E6_WIRE_RGB}
-        assert nibbles == {INK_BLACK, INK_WHITE, INK_YELLOW, INK_RED, INK_BLUE, INK_GREEN}
+        assert nibbles == {INK_BLACK, INK_WHITE, INK_YELLOW, INK_RED, INK_BLUE}
 
 
 # ---------------------------------------------------------------------------
@@ -190,12 +185,12 @@ class TestDitheredImage:
 
     # ---- colour coverage ----
 
-    def test_all_six_colours_used(self, dithered_fs: Image.Image):
-        """A real photograph should use all six ink colours."""
+    def test_all_five_colours_used(self, dithered_fs: Image.Image):
+        """A real photograph should use all five ink wire colours."""
         arr = np.array(dithered_fs)
         unique = set(map(tuple, arr.reshape(-1, 3)))
         missing = E6_PALETTE_SET - unique
-        assert not missing, f"Palette colours absent from dithered output: {missing}"
+        assert not missing, f"Wire colours absent from dithered output: {missing}"
 
     def test_no_single_colour_dominates(self, dithered_fs: Image.Image):
         """No wire colour should exceed 70 % of pixels — sanity-checks dithering."""

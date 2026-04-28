@@ -58,13 +58,13 @@ class TestPaletteConstants:
     def test_bw_palette_set_is_correct(self):
         assert BW_PALETTE_SET == frozenset(BW_PALETTE_RGB)
 
-    def test_e6_palette_has_six_colors(self):
-        assert len(E6_PALETTE_RGB) == 6
+    def test_e6_palette_has_five_colors(self):
+        assert len(E6_PALETTE_RGB) == 5
 
     def test_e6_palette_contains_expected_colors(self):
-        # Physical ink colour approximations used as perceptual dithering targets
+        # Physical ink colour approximations (5 reachable inks; yellow/orange excluded)
         expected = [(0, 0, 0), (255, 255, 255), (178, 19, 24),
-                    (33, 87, 186), (0, 155, 0), (220, 110, 0)]
+                    (33, 87, 186), (0, 155, 0)]
         for c in expected:
             assert c in E6_PALETTE_RGB
 
@@ -254,9 +254,9 @@ class TestNearest:
         r, g, b = _nearest(128, 128, 128, "bw")
         assert (r, g, b) in ((0, 0, 0), (255, 255, 255))
 
-    def test_sharp_colors_in_e6_return_wire_color(self):
-        # Each dithering target is its own nearest neighbour; output is the
-        # corresponding wire-format colour (not the dithering target itself)
+    def test_each_target_snaps_to_its_wire_color(self):
+        # Each dithering target should be its own nearest neighbour in Lab space;
+        # the returned value is the corresponding wire-format colour.
         from sendspin_image_server.dither import E6_WIRE_RGB
         for i, color in enumerate(E6_PALETTE_RGB):
             r, g, b = _nearest(color[0], color[1], color[2], "e6")

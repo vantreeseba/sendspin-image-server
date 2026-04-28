@@ -72,7 +72,6 @@ E6_PALETTE_RGB: Final[list[tuple[int, int, int]]] = [
     (178, 19,  24),   # 2 Red ink — physical measurement
     (33,  87,  186),  # 3 Blue ink — physical measurement
     (0,   155, 0),    # 4 Green ink — threshold-adjusted for ESPHome G>127 requirement
-    (220, 110, 0),    # 5 Orange ink — physical approximation (nibble 6 on device)
 ]
 
 # Wire-format palette: RGB values that pass through ESPHome's color_to_hex()
@@ -80,14 +79,18 @@ E6_PALETTE_RGB: Final[list[tuple[int, int, int]]] = [
 #   (255,255,0) → YELLOW zone → nibble 2 → Red ink
 #   (255,0,0)   → RED zone    → nibble 3 → Blue ink
 #   (0,0,255)   → BLUE zone   → nibble 5 → Green ink
-#   (0,255,0)   → GREEN zone  → nibble 6 → Orange ink
+#
+# Note: nibble 4 (SKIP_1) and nibble 6 (GREEN zone → Orange/weird-red ink) are
+# intentionally excluded. Yellow ink (nibble 4) is unreachable through color_to_hex().
+# Nibble 6 shows as a reddish colour indistinguishable from nibble 2, so including
+# it just routes yellow/warm source areas to a second red, making yellows look red.
+# Without it, yellow source pixels fall to Green (Lab-nearest) which is more neutral.
 E6_WIRE_RGB: Final[list[tuple[int, int, int]]] = [
     (0,   0,   0),    # nibble 0 → Black
     (255, 255, 255),  # nibble 1 → White
     (255, 255, 0),    # nibble 2 → Red ink
     (255, 0,   0),    # nibble 3 → Blue ink
     (0,   0,   255),  # nibble 5 → Green ink
-    (0,   255, 0),    # nibble 6 → Orange ink
 ]
 
 PALETTE_RGB: Final[dict[str, list[tuple[int, int, int]]]] = {
