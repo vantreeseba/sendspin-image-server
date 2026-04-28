@@ -453,7 +453,7 @@ async def _push(
     from sendspin_image_server.stream import push_image_to_client
 
     force_dither = dither_algo != _NO_DITHER_SENTINEL and dither_palette != "none"
-    sent_bytes = push_image_to_client(
+    sent_bytes = await push_image_to_client(
         client,
         data,
         0,
