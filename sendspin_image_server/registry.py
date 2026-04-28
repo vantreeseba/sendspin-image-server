@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import pathlib
 from typing import TYPE_CHECKING, Any
@@ -292,7 +291,7 @@ class EndpointRegistry:
                 continue
             kind = row["kind"]
             name = row["name"]
-            cfg = json.loads(row.get("config_json", "{}"))
+            cfg = row.get("config", {})
             ep: ImageEndpoint | None
             if kind == "local":
                 ep = LocalFolderEndpoint(
