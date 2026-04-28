@@ -58,24 +58,22 @@ class TestPaletteConstants:
     def test_bw_palette_set_is_correct(self):
         assert BW_PALETTE_SET == frozenset(BW_PALETTE_RGB)
 
-    def test_e6_palette_has_five_colors(self):
-        assert len(E6_PALETTE_RGB) == 5
+    def test_e6_palette_has_six_colors(self):
+        assert len(E6_PALETTE_RGB) == 6
 
     def test_e6_palette_contains_expected_colors(self):
-        # Physical ink colours used as dithering targets
-        expected = [(0, 0, 0), (255, 255, 255), (178, 19, 24), (33, 87, 186), (18, 120, 30)]
+        # Physical Spectra 6 ink colours (black/white use pure values for quantize stability)
+        expected = [(0, 0, 0), (255, 255, 255), (18, 95, 32),
+                    (33, 87, 186), (178, 19, 24), (239, 222, 68)]
         for c in expected:
             assert c in E6_PALETTE_RGB
 
     def test_e6_palette_set_is_correct(self):
-        from sendspin_image_server.dither import E6_WIRE_RGB
-        # E6_PALETTE_SET contains wire-format output colours
-        assert E6_PALETTE_SET == frozenset(map(tuple, E6_WIRE_RGB))
+        assert E6_PALETTE_SET == frozenset(map(tuple, E6_PALETTE_RGB))
 
-    def test_palette_sets_match_wire_lists(self):
-        from sendspin_image_server.dither import WIRE_RGB
-        for name, wire_rgb in WIRE_RGB.items():
-            assert PALETTE_SETS[name] == frozenset(map(tuple, wire_rgb))
+    def test_palette_sets_match_rgb_lists(self):
+        for name, palette_rgb in PALETTE_RGB.items():
+            assert PALETTE_SETS[name] == frozenset(map(tuple, palette_rgb))
 
     def test_all_rgb_pairs_are_valid(self):
         for name, palette in PALETTE_RGB.items():
@@ -252,26 +250,26 @@ class TestNearest:
         r, g, b = _nearest(128, 128, 128, "bw")
         assert (r, g, b) in ((0, 0, 0), (255, 255, 255))
 
-    def test_each_palette_target_maps_to_wire(self):
-        from sendspin_image_server.dither import E6_WIRE_RGB
-        for i, target in enumerate(E6_PALETTE_RGB):
-            r, g, b = _nearest(*target, "e6")
-            assert (r, g, b) == E6_WIRE_RGB[i]
+    def test_each_palette_color_snaps_to_itself(self):
+        for color in E6_PALETTE_RGB:
+            r, g, b = _nearest(*color, "e6")
+            assert (r, g, b) == color
 
-    def test_red_source_maps_to_red_wire(self):
-        from sendspin_image_server.dither import E6_WIRE_RGB
+    def test_saturated_red_snaps_to_red(self):
         r, g, b = _nearest(200, 20, 20, "e6")
-        assert (r, g, b) == E6_WIRE_RGB[2]  # (255,255,0) → Red ink
+        assert (r, g, b) == (178, 19, 24)
 
-    def test_blue_source_maps_to_blue_wire(self):
-        from sendspin_image_server.dither import E6_WIRE_RGB
+    def test_saturated_blue_snaps_to_blue(self):
         r, g, b = _nearest(20, 50, 200, "e6")
-        assert (r, g, b) == E6_WIRE_RGB[3]  # (255,0,0) → Blue ink
+        assert (r, g, b) == (33, 87, 186)
 
-    def test_green_source_maps_to_green_wire(self):
-        from sendspin_image_server.dither import E6_WIRE_RGB
-        r, g, b = _nearest(20, 160, 30, "e6")
-        assert (r, g, b) == E6_WIRE_RGB[4]  # (0,0,255) → Green ink
+    def test_saturated_green_snaps_to_green(self):
+        r, g, b = _nearest(20, 150, 30, "e6")
+        assert (r, g, b) == (18, 95, 32)
+
+    def test_saturated_yellow_snaps_to_yellow(self):
+        r, g, b = _nearest(240, 220, 30, "e6")
+        assert (r, g, b) == (239, 222, 68)
 
     def test_nearest_returns_color_from_palette(self):
         r, g, b = _nearest(255, 255, 255, "e6")

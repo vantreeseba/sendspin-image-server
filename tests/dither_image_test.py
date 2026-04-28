@@ -22,7 +22,6 @@ from sendspin_image_server.dither import (
     DITHER_ALGOS,
     E6_PALETTE_RGB,
     E6_PALETTE_SET,
-    E6_WIRE_RGB,
     dither_to_pil,
 )
 
@@ -69,12 +68,10 @@ def esphome_ink_index(r: int, g: int, b: int) -> int:
     return INK_BLACK
 
 
-# Expected ESPHome nibble for each wire-format output colour.
-WIRE_INK: dict[tuple[int, int, int], int] = {
+PALETTE_INK: dict[tuple[int, int, int], int] = {
     (c[0], c[1], c[2]): esphome_ink_index(*c)
-    for c in E6_WIRE_RGB
+    for c in E6_PALETTE_RGB
 }
-PALETTE_INK = WIRE_INK
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -114,42 +111,28 @@ def dithered_atkinson(source_jpeg: bytes) -> Image.Image:
 # ---------------------------------------------------------------------------
 
 
-class TestPaletteEsphomeZones:
-    """Verify each wire-format colour hits the correct ESPHome nibble zone.
+class TestPaletteColors:
+    """Verify the Spectra 6 physical ink palette entries are sane."""
 
-    Hardware calibration (verified):
-      wire (0,0,0)       → nibble 0 → Black ink
-      wire (255,255,255) → nibble 1 → White ink
-      wire (255,255,0)   → nibble 2 → Red ink   (YELLOW zone)
-      wire (255,0,0)     → nibble 3 → Blue ink  (RED zone)
-      wire (0,0,255)     → nibble 5 → Green ink (BLUE zone)
-    """
+    def test_six_palette_entries(self):
+        assert len(E6_PALETTE_RGB) == 6
 
-    def test_black_wire_hits_black_nibble(self):
-        assert esphome_ink_index(*E6_WIRE_RGB[0]) == INK_BLACK
+    def test_all_values_in_range(self):
+        for r, g, b in E6_PALETTE_RGB:
+            assert 0 <= r <= 255
+            assert 0 <= g <= 255
+            assert 0 <= b <= 255
 
-    def test_white_wire_hits_white_nibble(self):
-        assert esphome_ink_index(*E6_WIRE_RGB[1]) == INK_WHITE
+    def test_black_is_dark(self):
+        r, g, b = E6_PALETTE_RGB[0]
+        assert r + g + b < 200
 
-    def test_red_ink_wire_hits_yellow_nibble(self):
-        assert esphome_ink_index(*E6_WIRE_RGB[2]) == INK_YELLOW  # nibble 2 → Red physical
+    def test_white_is_light(self):
+        r, g, b = E6_PALETTE_RGB[1]
+        assert r + g + b > 600
 
-    def test_blue_ink_wire_hits_red_nibble(self):
-        assert esphome_ink_index(*E6_WIRE_RGB[3]) == INK_RED  # nibble 3 → Blue physical
-
-    def test_green_ink_wire_hits_blue_nibble(self):
-        assert esphome_ink_index(*E6_WIRE_RGB[4]) == INK_BLUE  # nibble 5 → Green physical
-
-    def test_no_wire_colour_uses_orange_nibble(self):
-        """nibble 6 (GREEN zone) shows as Red on this display — intentionally excluded."""
-        for color in E6_WIRE_RGB:
-            assert esphome_ink_index(*color) not in (INK_GREEN, INK_ORANGE), (
-                f"Wire colour {color} unexpectedly maps to Green/Orange nibble"
-            )
-
-    def test_all_required_nibbles_present(self):
-        nibbles = {esphome_ink_index(*c) for c in E6_WIRE_RGB}
-        assert nibbles == {INK_BLACK, INK_WHITE, INK_YELLOW, INK_RED, INK_BLUE}
+    def test_all_six_colours_distinct(self):
+        assert len(set(map(tuple, E6_PALETTE_RGB))) == 6
 
 
 # ---------------------------------------------------------------------------
@@ -176,41 +159,37 @@ class TestDitheredImage:
 
     # ---- colour coverage ----
 
-    def test_all_five_wire_colours_used(self, dithered_fs: Image.Image):
-        """A real photograph should use all five wire-format output colours."""
+    def test_all_six_colours_used(self, dithered_fs: Image.Image):
+        """A real photograph should use all six palette colours."""
         arr = np.array(dithered_fs)
         unique = set(map(tuple, arr.reshape(-1, 3)))
-        missing = E6_PALETTE_SET - unique  # E6_PALETTE_SET == E6_WIRE_SET
-        assert not missing, f"Wire colours absent from dithered output: {missing}"
+        missing = E6_PALETTE_SET - unique
+        assert not missing, f"Palette colours absent from dithered output: {missing}"
 
     def test_no_single_colour_dominates(self, dithered_fs: Image.Image):
-        """No wire colour should exceed 70 % of pixels — sanity-checks dithering."""
+        """No colour should exceed 70 % of pixels — sanity-checks dithering."""
         arr = np.array(dithered_fs).reshape(-1, 3)
         n = len(arr)
-        for color in E6_WIRE_RGB:
+        for color in E6_PALETTE_RGB:
             count = int(np.sum(np.all(arr == color, axis=1)))
             frac = count / n
             assert frac < 0.70, (
-                f"Wire colour {color} dominates at {frac:.1%} of pixels"
+                f"Colour {color} dominates at {frac:.1%} of pixels"
             )
 
     # ---- ESPHome zone correctness on the actual image ----
 
-    def test_no_pixels_in_excluded_zones(self, dithered_fs: Image.Image):
-        """No output pixel should land in the GREEN zone (nibble 6 → Red physical)
-        or the ORANGE zone (nibble 6 on 7-colour displays).  Both show as red,
-        duplicating the RED-ink zone and making green areas look red.
-        """
-        arr = np.array(dithered_fs).astype(int)
-        r, g, b = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
-        # GREEN zone: R≤128, G>128, B≤128 → nibble 6 → Red physical
-        green_zone = (r <= 128) & (g > 128) & (b <= 128)
-        # ORANGE zone: R>127, G>85, G≤170 → nibble 6
-        orange_zone = (r > 127) & (g > 85) & (g <= 170)
-        bad = int(np.sum(green_zone | orange_zone))
-        assert bad == 0, (
-            f"{bad} pixels fall in excluded ESPHome zones (would render as wrong ink)"
-        )
+    def test_atkinson_all_pixels_in_palette(self, dithered_atkinson: Image.Image):
+        arr = np.array(dithered_atkinson)
+        unique = set(map(tuple, arr.reshape(-1, 3)))
+        rogue = unique - E6_PALETTE_SET
+        assert not rogue, f"Non-palette pixels in Atkinson output: {rogue}"
+
+    def test_all_output_pixels_in_palette(self, dithered_fs: Image.Image):
+        arr = np.array(dithered_fs)
+        unique = set(map(tuple, arr.reshape(-1, 3)))
+        rogue = unique - E6_PALETTE_SET
+        assert not rogue, f"Non-palette pixels in FS output: {rogue}"
 
     def test_output_dimensions_match_input(self, dithered_fs: Image.Image):
         assert dithered_fs.size == (DISPLAY_W, DISPLAY_H)
