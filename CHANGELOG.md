@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.11.0 (2026-04-28)
+
+### Features
+
+- Release new version
+  ([`e2f86f7`](https://github.com/vantreeseba/sendspin-image-server/commit/e2f86f7c63c475b7067f253673c3fde9016b07b3))
+
+
 ## v1.10.1 (2026-04-28)
 
 ### Bug Fixes
