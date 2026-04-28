@@ -505,32 +505,27 @@ async def run(
         return web.Response(status=204)
 
     async def api_get_client_debug_image(request: web.Request) -> web.Response:
-        """GET /api/clients/{id}/debug-image — return the last image pushed to a client."""
+        """GET /api/clients/{id}/debug-image — return the last image pushed to this client."""
         client_id = request.match_info["id"]
-
-        last_image = getattr(server, "_last_image", None)
-
-        # Handle both legacy scalar bytes and new dict format
-        image_bytes: bytes | None
-        if isinstance(last_image, dict):
-            # New format: dict of client images keyed by client_id (or None for global)
-            image_bytes = last_image.get(client_id) or last_image.get(None)
-        elif isinstance(last_image, bytes):
-            # Legacy: raw bytes
-            image_bytes = last_image
-        else:
-            image_bytes = None
+        image_bytes: bytes | None = server._last_image.get(client_id)
 
         if not image_bytes:
             return web.Response(
                 status=404,
-                text=f"No image data available for client {client_id!r}",
+                text=f"No image sent to client {client_id!r} yet",
             )
 
-        return web.Response(
-            body=image_bytes,
-            content_type="image/png",
-        )
+        # Detect actual format from magic bytes rather than assuming PNG.
+        if image_bytes[:4] == b"\x89PNG":
+            ct = "image/png"
+        elif image_bytes[:2] == b"\xff\xd8":
+            ct = "image/jpeg"
+        elif image_bytes[:2] == b"BM":
+            ct = "image/bmp"
+        else:
+            ct = "application/octet-stream"
+
+        return web.Response(body=image_bytes, content_type=ct)
 
     async def api_push_client_image(request: web.Request) -> web.Response:
         """POST /api/clients/{id}/push — immediately push next image to a connected client."""
