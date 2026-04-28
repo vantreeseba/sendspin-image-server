@@ -44,6 +44,7 @@ export interface Client {
   interval: number; // seconds; 0 = server default
   discovered_url?: string | null;
   discovered_only: boolean;
+  mdns_name?: string | null;
   preset_id?: string | null;
 }
 

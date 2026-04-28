@@ -266,6 +266,7 @@ class ClientAssignmentManager:
                     "interval": self.client_interval(client.client_id),
                     "discovered_url": None,
                     "discovered_only": False,
+                    "mdns_name": None,
                 }
             )
 
@@ -277,6 +278,7 @@ class ClientAssignmentManager:
                 continue  # malformed entry — guard clause
             url: str = raw_url
             known_client_id: str | None = entry["client_id"]
+            mdns_name: str | None = entry.get("mdns_name")
 
             # Already connected — skip (tier 1 owns it).
             if known_client_id is not None and known_client_id in connected_ids:
@@ -309,6 +311,7 @@ class ClientAssignmentManager:
                 "interval": self.client_interval(entry_id),
                 "discovered_url": url,
                 "discovered_only": not has_db_record,
+                "mdns_name": mdns_name,
             }
             if has_db_record:
                 offline_db.append(entry_dict)
@@ -340,6 +343,7 @@ class ClientAssignmentManager:
                     "interval": self.client_interval(db_client_id),
                     "discovered_url": last_url,
                     "discovered_only": False,
+                    "mdns_name": None,
                 }
             )
 

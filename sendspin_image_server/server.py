@@ -47,6 +47,8 @@ class SendspinImageServer:
         self._outbound_tasks: dict[str, asyncio.Task[None]] = {}
         # url → url: all URLs we are tracking (discovered via mDNS or connect_to_client)
         self._discovered_clients: dict[str, str] = {}
+        # url → mDNS instance name (e.g. "photo-frame-2")
+        self._discovered_client_names: dict[str, str] = {}
         # url → real client_id: populated after a successful client/hello handshake
         self._url_to_client_id: dict[str, str] = {}
         # Optional back-reference to the registry — set by cli.py after both are created
@@ -99,7 +101,7 @@ class SendspinImageServer:
             self._ws_server.close()
             await self._ws_server.wait_closed()
 
-    def connect_to_client(self, url: str) -> None:
+    def connect_to_client(self, url: str, mdns_name: str | None = None) -> None:
         """Start a persistent server-initiated connection to a client URL.
 
         The connection is maintained automatically: if the client disconnects
@@ -110,6 +112,8 @@ class SendspinImageServer:
             return  # already managing this URL
         # Register as discovered immediately — before any handshake succeeds.
         self._discovered_clients[url] = url
+        if mdns_name:
+            self._discovered_client_names[url] = mdns_name
         task = asyncio.create_task(
             self._outbound_connection_loop(url),
             name=f"outbound-{url}",
@@ -143,12 +147,17 @@ class SendspinImageServer:
             task.cancel()
             logger.info("Cancelled outbound connection to %s", url)
         self._discovered_clients.pop(url, None)
+        self._discovered_client_names.pop(url, None)
         self._url_to_client_id.pop(url, None)
 
     def get_discovered_urls(self) -> list[dict[str, str | None]]:
-        """Return all tracked URLs with their known client_id (if any)."""
+        """Return all tracked URLs with their known client_id and mDNS name (if any)."""
         return [
-            {"url": url, "client_id": self._url_to_client_id.get(url)}
+            {
+                "url": url,
+                "client_id": self._url_to_client_id.get(url),
+                "mdns_name": self._discovered_client_names.get(url),
+            }
             for url in self._discovered_clients
         ]
 

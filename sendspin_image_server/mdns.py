@@ -123,7 +123,7 @@ class MDNSDiscovery:
 
     def __init__(
         self,
-        on_client_added: Callable[[str], None],
+        on_client_added: Callable[[str, str], None],
         on_client_removed: Callable[[str], None],
     ) -> None:
         self._on_client_added = on_client_added
@@ -201,8 +201,9 @@ class MDNSDiscovery:
             return  # already connected
 
         self._known[name] = url
+        display_name = name.split("._")[0]
         logger.info("mDNS: discovered Sendspin client '%s' at %s", name, url)
-        self._on_client_added(url)
+        self._on_client_added(url, display_name)
 
     def _handle_removed(self, name: str) -> None:
         url = self._known.pop(name, None)

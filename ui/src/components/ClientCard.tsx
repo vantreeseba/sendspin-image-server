@@ -222,6 +222,7 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
 
       <CardContent className="space-y-1.5">
         <Row label="ID">{client.id}</Row>
+        {client.mdns_name && <Row label="mDNS">{client.mdns_name}</Row>}
         {client.discovered_url && <Row label="URL">{client.discovered_url}</Row>}
         {ch && (
           <>
