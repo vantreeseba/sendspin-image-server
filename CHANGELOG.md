@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.14.0 (2026-04-28)
+
+### Features
+
+- **dither**: Replace custom Floyd-Steinberg with PIL quantize (Waveshare method)
+  ([`cce883e`](https://github.com/vantreeseba/sendspin-image-server/commit/cce883e16545773d91449dc47a406bb99e405ab1))
+
+
 ## v1.13.4 (2026-04-28)
 
 
