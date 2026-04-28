@@ -114,8 +114,8 @@ def dithered_atkinson(source_jpeg: bytes) -> Image.Image:
 class TestPaletteColors:
     """Verify the Spectra 6 physical ink palette entries are sane."""
 
-    def test_six_palette_entries(self):
-        assert len(E6_PALETTE_RGB) == 6
+    def test_seven_palette_entries(self):
+        assert len(E6_PALETTE_RGB) == 7
 
     def test_all_values_in_range(self):
         for r, g, b in E6_PALETTE_RGB:
@@ -131,8 +131,8 @@ class TestPaletteColors:
         r, g, b = E6_PALETTE_RGB[1]
         assert r + g + b > 600
 
-    def test_all_six_colours_distinct(self):
-        assert len(set(map(tuple, E6_PALETTE_RGB))) == 6
+    def test_all_seven_colours_distinct(self):
+        assert len(set(map(tuple, E6_PALETTE_RGB))) == 7
 
 
 # ---------------------------------------------------------------------------
@@ -159,8 +159,8 @@ class TestDitheredImage:
 
     # ---- colour coverage ----
 
-    def test_all_six_colours_used(self, dithered_fs: Image.Image):
-        """A real photograph should use all six palette colours."""
+    def test_all_seven_colours_used(self, dithered_fs: Image.Image):
+        """A real photograph should use all seven palette colours."""
         arr = np.array(dithered_fs)
         unique = set(map(tuple, arr.reshape(-1, 3)))
         missing = E6_PALETTE_SET - unique

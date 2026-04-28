@@ -58,13 +58,13 @@ class TestPaletteConstants:
     def test_bw_palette_set_is_correct(self):
         assert BW_PALETTE_SET == frozenset(BW_PALETTE_RGB)
 
-    def test_e6_palette_has_six_colors(self):
-        assert len(E6_PALETTE_RGB) == 6
+    def test_e6_palette_has_seven_colors(self):
+        assert len(E6_PALETTE_RGB) == 7
 
     def test_e6_palette_contains_expected_colors(self):
-        # Physical Spectra 6 ink colours (black/white use pure values for quantize stability)
-        expected = [(0, 0, 0), (255, 255, 255), (18, 95, 32),
-                    (33, 87, 186), (178, 19, 24), (239, 222, 68)]
+        # Waveshare ACeP 7-colour palette (Waveshare epd7in3f official values)
+        expected = [(0, 0, 0), (255, 255, 255), (0, 255, 0),
+                    (0, 0, 255), (255, 0, 0), (255, 255, 0), (255, 128, 0)]
         for c in expected:
             assert c in E6_PALETTE_RGB
 
@@ -257,19 +257,23 @@ class TestNearest:
 
     def test_saturated_red_snaps_to_red(self):
         r, g, b = _nearest(200, 20, 20, "e6")
-        assert (r, g, b) == (178, 19, 24)
+        assert (r, g, b) == (255, 0, 0)
 
     def test_saturated_blue_snaps_to_blue(self):
         r, g, b = _nearest(20, 50, 200, "e6")
-        assert (r, g, b) == (33, 87, 186)
+        assert (r, g, b) == (0, 0, 255)
 
     def test_saturated_green_snaps_to_green(self):
         r, g, b = _nearest(20, 150, 30, "e6")
-        assert (r, g, b) == (18, 95, 32)
+        assert (r, g, b) == (0, 255, 0)
 
     def test_saturated_yellow_snaps_to_yellow(self):
         r, g, b = _nearest(240, 220, 30, "e6")
-        assert (r, g, b) == (239, 222, 68)
+        assert (r, g, b) == (255, 255, 0)
+
+    def test_orange_snaps_to_orange(self):
+        r, g, b = _nearest(220, 100, 10, "e6")
+        assert (r, g, b) == (255, 128, 0)
 
     def test_nearest_returns_color_from_palette(self):
         r, g, b = _nearest(255, 255, 255, "e6")
@@ -383,13 +387,25 @@ class TestDitherToPilWithNonePalette:
         assert len(unique) > 6  # gradient should produce many colors when not restricted
 
 
-class TestFsSerpentineAlias:
-    """Verify floyd-steinberg and floyd-steinberg-serpentine produce identical output."""
+class TestFsSerpentineDistinct:
+    """Verify floyd-steinberg and floyd-steinberg-serpentine produce different output.
 
-    def test_identical_output(self, solid_jpeg: bytes):
-        result1 = dither_to_pil(solid_jpeg, "floyd-steinberg", "bw")
-        result2 = dither_to_pil(solid_jpeg, "floyd-steinberg-serpentine", "bw")
-        np.testing.assert_array_equal(np.array(result1), np.array(result2))
+    floyd-steinberg uses PIL's C quantize (left-to-right scan).
+    floyd-steinberg-serpentine uses a pure-Python bidirectional Lab LUT path.
+    On a non-uniform image they produce different dithering patterns.
+    """
+
+    def test_different_output_on_gradient(self, gradient_jpeg: bytes):
+        result1 = dither_to_pil(gradient_jpeg, "floyd-steinberg", "bw")
+        result2 = dither_to_pil(gradient_jpeg, "floyd-steinberg-serpentine", "bw")
+        assert not np.array_equal(np.array(result1), np.array(result2))
+
+    def test_both_produce_palette_pixels(self, gradient_jpeg: bytes):
+        from sendspin_image_server.dither import BW_PALETTE_SET
+        for algo in ("floyd-steinberg", "floyd-steinberg-serpentine"):
+            arr = np.array(dither_to_pil(gradient_jpeg, algo, "bw"))
+            unique = set(map(tuple, arr.reshape(-1, 3)))
+            assert unique.issubset(BW_PALETTE_SET)
 
 
 # ===== SECTION: encode_pil ===
@@ -450,10 +466,9 @@ class TestDitherToBytes:
         decoded = Image.open(io.BytesIO(result))
         assert decoded.mode == "RGB"
 
-    def test_floyd_steinberg_serpentine_alias_consistent(self, solid_jpeg: bytes):
-        r1 = dither_to_bytes(solid_jpeg, "floyd-steinberg", "png", "bw")
-        r2 = dither_to_bytes(solid_jpeg, "floyd-steinberg-serpentine", "png", "bw")
-        assert r1 == r2
+    def test_floyd_steinberg_serpentine_produces_bytes(self, solid_jpeg: bytes):
+        r = dither_to_bytes(solid_jpeg, "floyd-steinberg-serpentine", "png", "bw")
+        assert isinstance(r, bytes) and len(r) > 0
 
     def test_atkinson_produces_output(self, solid_jpeg: bytes):
         result = dither_to_bytes(solid_jpeg, "atkinson", "png", "e6")

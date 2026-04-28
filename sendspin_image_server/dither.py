@@ -55,19 +55,17 @@ BW_PALETTE_RGB: Final[list[tuple[int, int, int]]] = [
     (255, 255, 255),  # 1 White
 ]
 
-# Measured physical ink colours for the E Ink Spectra 6 panel.
-# Source: community spectral measurements (quark-zju gist, cross-referenced
-# with Pimoroni forum calibration data) — E Ink does not publish official sRGB
-# coordinates.  These values represent the actual on-screen appearance of each
-# ink and are used directly as dithering targets so error diffusion is
-# perceptually accurate.
+# Exact RGB values used by Waveshare's official epd7in3f/epd5in65f drivers in
+# their getbuffer() palette.  These are the 7-colour ACeP primaries; the display
+# controller maps each 4-bit index to the corresponding physical ink.
 E6_PALETTE_RGB: Final[list[tuple[int, int, int]]] = [
-    (0,   0,   0),    # 0 Black   (measured: ~25,30,33 — using pure for quantize stability)
-    (255, 255, 255),  # 1 White   (measured: ~232,232,232 — using pure for quantize stability)
-    (18,  95,  32),   # 2 Green
-    (33,  87,  186),  # 3 Blue
-    (178, 19,  24),   # 4 Red
-    (239, 222, 68),   # 5 Yellow
+    (0,   0,   0),    # 0 Black
+    (255, 255, 255),  # 1 White
+    (0,   255, 0),    # 2 Green
+    (0,   0,   255),  # 3 Blue
+    (255, 0,   0),    # 4 Red
+    (255, 255, 0),    # 5 Yellow
+    (255, 128, 0),    # 6 Orange
 ]
 
 PALETTE_RGB: Final[dict[str, list[tuple[int, int, int]]]] = {
@@ -178,6 +176,25 @@ def _nearest(r: int, g: int, b: int, palette: DitheringPalette) -> tuple[int, in
 
 
 # ---------------------------------------------------------------------------
+# Pre-built Pillow palette images (used by floyd-steinberg path)
+# ---------------------------------------------------------------------------
+
+def _build_palette_image(palette_rgb: list[tuple[int, int, int]]) -> Image.Image:
+    pal_data: list[int] = []
+    for r, g, b in palette_rgb:
+        pal_data.extend([r, g, b])
+    pal_data += [0, 0, 0] * (256 - len(palette_rgb))
+    pal_img = Image.new("P", (1, 1))
+    pal_img.putpalette(pal_data)
+    return pal_img
+
+
+_PALETTE_IMAGES: Final[dict[str, Image.Image]] = {
+    name: _build_palette_image(rgb) for name, rgb in PALETTE_RGB.items()
+}
+
+
+# ---------------------------------------------------------------------------
 # Section 4 — dithering algorithms
 # ---------------------------------------------------------------------------
 
@@ -189,14 +206,44 @@ def _preprocess(img: Image.Image) -> Image.Image:
     return img
 
 
-def _pil_floyd_steinberg(img: Image.Image, palette: DitheringPalette) -> Image.Image:
-    """Floyd-Steinberg dithering via PIL's built-in C quantize()."""
-    colors = PALETTE_RGB[palette]
-    pal_img = Image.new("P", (1, 1))
-    flat = [v for c in colors for v in c]
-    flat += [0] * (768 - len(flat))
-    pal_img.putpalette(flat)
-    return img.quantize(palette=pal_img, dither=Image.Dither.FLOYDSTEINBERG).convert("RGB")
+def _floyd_steinberg(img: Image.Image, palette: DitheringPalette) -> Image.Image:
+    """Floyd-Steinberg via Pillow's C quantize engine."""
+    return img.quantize(palette=_PALETTE_IMAGES[palette], dither=Image.Dither.FLOYDSTEINBERG).convert("RGB")
+
+
+def _serpentine_floyd_steinberg(img: Image.Image, palette: DitheringPalette) -> Image.Image:
+    """Bidirectional Floyd-Steinberg error diffusion (pure Python, Lab LUT).
+
+    Alternates horizontal scan direction each row to eliminate the directional
+    grain streak that left-to-right-only diffusion produces on smooth gradients.
+    """
+    w, h = img.size
+    buf = list(img.tobytes())
+
+    def add_err(x: int, y: int, er: int, eg: int, eb: int) -> None:
+        if 0 <= x < w and 0 <= y < h:
+            o = (y * w + x) * 3
+            buf[o]     = max(0, min(255, buf[o]     + er))
+            buf[o + 1] = max(0, min(255, buf[o + 1] + eg))
+            buf[o + 2] = max(0, min(255, buf[o + 2] + eb))
+
+    out = bytearray(w * h * 3)
+
+    for y in range(h):
+        xs = range(w) if y % 2 == 0 else range(w - 1, -1, -1)
+        forward = 1 if y % 2 == 0 else -1
+        for x in xs:
+            o = (y * w + x) * 3
+            or_, og, ob = buf[o], buf[o + 1], buf[o + 2]
+            pr, pg, pb = _nearest(or_, og, ob, palette)
+            out[o], out[o + 1], out[o + 2] = pr, pg, pb
+            er, eg, eb = or_ - pr, og - pg, ob - pb
+            add_err(x + forward, y,      (er * 7) >> 4, (eg * 7) >> 4, (eb * 7) >> 4)
+            add_err(x - forward, y + 1,  (er * 3) >> 4, (eg * 3) >> 4, (eb * 3) >> 4)
+            add_err(x,           y + 1,  (er * 5) >> 4, (eg * 5) >> 4, (eb * 5) >> 4)
+            add_err(x + forward, y + 1,  (er * 1) >> 4, (eg * 1) >> 4, (eb * 1) >> 4)
+
+    return Image.frombytes("RGB", (w, h), bytes(out))
 
 
 def _atkinson(img: Image.Image, palette: DitheringPalette) -> Image.Image:
@@ -282,32 +329,25 @@ def dither_to_pil(
     - **palette="none"** → no palette restriction; full color passthrough
       with preprocessing (contrast + saturation boost) but no colour quantization.
     - **all other combos**: preprocess, then dither to palette using Lab LUT.
-    - **"floyd-steinberg"** and **"floyd-steinberg-serpentine"** both use PIL's quantize().
+    - **"floyd-steinberg"** uses PIL's C quantize engine (fast).
+    - **"floyd-steinberg-serpentine"** uses a pure-Python bidirectional Lab LUT path.
     """
-    # Algo "none": pure passthrough — no preprocessing, no dithering, no palette
-    if algo == "none":
-        src = Image.open(io.BytesIO(image_bytes))
-        src.load()
-        return src.convert("RGB")
-
-    # Load and preprocess (contrast + saturation boost before quantisation)
     src = Image.open(io.BytesIO(image_bytes))
     src.load()
     img = _preprocess(src)
 
-    # Palette "none": full color passthrough — no colour quantization
-    if palette == "none":
+    if palette == "none" or algo == "none":
         return img
 
-    match algo:
-        case "floyd-steinberg" | "floyd-steinberg-serpentine":
-            return _pil_floyd_steinberg(img, palette)
-        case "atkinson":
-            return _atkinson(img, palette)
-        case "ordered":
-            return _ordered(img, palette)
-        case _:
-            raise ValueError(f"Unknown dithering algorithm: {algo!r}. Choose from {DITHER_ALGOS}")
+    if algo == "floyd-steinberg":
+        return _floyd_steinberg(img, palette)
+    if algo == "floyd-steinberg-serpentine":
+        return _serpentine_floyd_steinberg(img, palette)
+    if algo == "atkinson":
+        return _atkinson(img, palette)
+    if algo == "ordered":
+        return _ordered(img, palette)
+    raise ValueError(f"Unknown dithering algorithm: {algo!r}. Choose from {DITHER_ALGOS}")
 
 
 def encode_pil(pil_img: Image.Image, orig_format: str) -> bytes:
