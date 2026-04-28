@@ -141,4 +141,4 @@ async def push_image_to_client(
     ts = server_time_us()
     msg = build_artwork_message(channel, ts, image_bytes)
     await client.websocket.send(msg)
-    return msg
+    return image_bytes

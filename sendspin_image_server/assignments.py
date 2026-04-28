@@ -419,7 +419,7 @@ class ClientAssignmentManager:
                     push_time = time.monotonic()
                     for c, result in zip(due_clients, results, strict=False):
                         if isinstance(result, Exception):
-                            logger.warning("Failed to push to client %s: %s", c.client_id, result)
+                            logger.exception("Failed to push to client %s", c.client_id, exc_info=result)
                         else:
                             last_push[c.client_id] = push_time
                 elif all_clients:

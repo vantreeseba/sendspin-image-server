@@ -498,12 +498,12 @@ async def run(
         if not image_bytes:
             return web.Response(
                 status=404,
-                content=f"No image data available for client {client_id!r}",
+                text=f"No image data available for client {client_id!r}",
             )
 
         return web.Response(
-            content=image_bytes,
-            media_type="image/png",
+            body=image_bytes,
+            content_type="image/png",
         )
 
     async def api_connect_client(request: web.Request) -> web.Response:
