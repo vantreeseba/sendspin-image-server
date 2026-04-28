@@ -62,8 +62,9 @@ class TestPaletteConstants:
         assert len(E6_PALETTE_RGB) == 6
 
     def test_e6_palette_contains_expected_colors(self):
-        expected = [(0, 0, 0), (255, 255, 255), (0, 255, 0),
-                    (0, 0, 255), (255, 0, 0), (255, 255, 0)]
+        # Physical ink colors for the Waveshare Spectra E6 (PhotoPainter)
+        expected = [(25, 30, 33), (232, 232, 232), (18, 95, 32),
+                    (33, 87, 186), (178, 19, 24), (239, 222, 68)]
         for c in expected:
             assert c in E6_PALETTE_RGB
 
@@ -186,19 +187,35 @@ class TestRgbToLab:
 
     def test_red_is_positive_a_star(self):
         lab = _rgb_to_lab(255, 0, 0)
-        assert lab[1] > 50  # a* is strongly positive for red
+        assert lab[1] > 50  # a* strongly positive for saturated red
 
     def test_green_is_negative_a_star(self):
         lab = _rgb_to_lab(0, 200, 0)
-        assert lab[1] < -50  # a* is strongly negative for green
+        assert lab[1] < -50  # a* strongly negative for saturated green
 
     def test_blue_is_negative_b_star(self):
         lab = _rgb_to_lab(0, 0, 255)
-        assert lab[2] < -50  # b* is strongly negative for blue
+        assert lab[2] < -50  # b* strongly negative for saturated blue
 
     def test_yellow_is_positive_b_star(self):
         lab = _rgb_to_lab(255, 255, 0)
-        assert lab[2] > 50  # b* is strongly positive for yellow
+        assert lab[2] > 50  # b* strongly positive for saturated yellow
+
+    def test_physical_red_has_positive_a_star(self):
+        lab = _rgb_to_lab(178, 19, 24)
+        assert lab[1] > 30  # physical red ink is still positive a*
+
+    def test_physical_green_has_negative_a_star(self):
+        lab = _rgb_to_lab(18, 95, 32)
+        assert lab[1] < -10  # physical green ink is negative a*
+
+    def test_physical_blue_has_negative_b_star(self):
+        lab = _rgb_to_lab(33, 87, 186)
+        assert lab[2] < -10  # physical blue ink is negative b*
+
+    def test_physical_yellow_has_positive_b_star(self):
+        lab = _rgb_to_lab(239, 222, 68)
+        assert lab[2] > 20  # physical yellow ink is positive b*
 
 
 # ===== SECTION: LUT building ===
@@ -249,22 +266,22 @@ class TestNearest:
         assert (r, g, b) in ((0, 0, 0), (255, 255, 255))
 
     def test_sharp_colors_in_e6_return_exact(self):
-        # Each of the 6 e6 colors should be its own nearest neighbor
+        # Each palette color is its own nearest neighbour
         for color in E6_PALETTE_RGB:
             r, g, b = _nearest(color[0], color[1], color[2], "e6")
             assert (r, g, b) == color
 
-    def test_sharp_green_in_e6(self):
-        r, g, b = _nearest(0, 255, 0, "e6")
-        assert (r, g, b) == (0, 255, 0)
+    def test_physical_green_snaps_to_green(self):
+        r, g, b = _nearest(18, 95, 32, "e6")
+        assert (r, g, b) == (18, 95, 32)
 
-    def test_sharp_blue_in_e6(self):
-        r, g, b = _nearest(0, 0, 255, "e6")
-        assert (r, g, b) == (0, 0, 255)
+    def test_physical_blue_snaps_to_blue(self):
+        r, g, b = _nearest(33, 87, 186, "e6")
+        assert (r, g, b) == (33, 87, 186)
 
-    def test_sharp_red_in_e6(self):
-        r, g, b = _nearest(255, 0, 0, "e6")
-        assert (r, g, b) == (255, 0, 0)
+    def test_physical_red_snaps_to_red(self):
+        r, g, b = _nearest(178, 19, 24, "e6")
+        assert (r, g, b) == (178, 19, 24)
 
     def test_nearest_returns_color_from_palette(self):
         r, g, b = _nearest(255, 255, 255, "e6")

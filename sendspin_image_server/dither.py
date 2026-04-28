@@ -52,16 +52,17 @@ BW_PALETTE_RGB: Final[list[tuple[int, int, int]]] = [
     (255, 255, 255),  # 1 White
 ]
 
-# Exact RGB values used by Waveshare's official epd7in3f driver in its
-# getbuffer() palette. The display controller maps each 4-bit index to its
-# physical ink.
+# Measured physical ink colors for the Waveshare Spectra E6 (PhotoPainter /
+# ESP32-S3-PhotoPainter). These are the actual on-screen hues, not idealised
+# primaries. Using physical values gives accurate error-diffusion targets so
+# that the dithered image looks correct on the real hardware.
 E6_PALETTE_RGB: Final[list[tuple[int, int, int]]] = [
-    (0,   0,   0),    # 0 Black
-    (255, 255, 255),  # 1 White
-    (0,   255, 0),    # 2 Green
-    (0,   0,   255),  # 3 Blue
-    (255, 0,   0),    # 4 Red
-    (255, 255, 0),    # 5 Yellow
+    (25,  30,  33),   # 0 Black
+    (232, 232, 232),  # 1 White
+    (18,  95,  32),   # 2 Green
+    (33,  87,  186),  # 3 Blue
+    (178, 19,  24),   # 4 Red
+    (239, 222, 68),   # 5 Yellow
 ]
 
 PALETTE_RGB: Final[dict[str, list[tuple[int, int, int]]]] = {
