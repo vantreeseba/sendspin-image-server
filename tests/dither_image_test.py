@@ -22,6 +22,7 @@ from sendspin_image_server.dither import (
     DITHER_ALGOS,
     E6_PALETTE_RGB,
     E6_PALETTE_SET,
+    E6_WIRE_RGB,
     dither_to_pil,
 )
 
@@ -68,11 +69,12 @@ def esphome_ink_index(r: int, g: int, b: int) -> int:
     return INK_BLACK
 
 
-# Expected ESPHome nibble for each palette colour.
-PALETTE_INK: dict[tuple[int, int, int], int] = {
-    (color[0], color[1], color[2]): esphome_ink_index(*color)
-    for color in E6_PALETTE_RGB
+# Expected ESPHome nibble for each wire-format output colour.
+WIRE_INK: dict[tuple[int, int, int], int] = {
+    (c[0], c[1], c[2]): esphome_ink_index(*c)
+    for c in E6_WIRE_RGB
 }
+PALETTE_INK = WIRE_INK
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -113,41 +115,41 @@ def dithered_atkinson(source_jpeg: bytes) -> Image.Image:
 
 
 class TestPaletteEsphomeZones:
-    """Verify each palette colour maps through ESPHome's color_to_hex correctly.
+    """Verify each wire-format colour hits the correct ESPHome nibble zone.
 
-    When the Sendspin component renders the pre-dithered image, pure Waveshare
-    palette pixels are matched to their correct ink index via exact colour lookup.
-    These zone tests document the ESPHome nibble each colour would produce if
-    it fell through to the generic color_to_hex path.
+    Hardware calibration (verified):
+      wire (0,0,0)       → nibble 0 → Black ink
+      wire (255,255,255) → nibble 1 → White ink
+      wire (255,255,0)   → nibble 2 → Red ink   (YELLOW zone)
+      wire (255,0,0)     → nibble 3 → Blue ink  (RED zone)
+      wire (0,0,255)     → nibble 5 → Green ink (BLUE zone)
     """
 
-    def test_black_maps_to_black_zone(self):
-        assert esphome_ink_index(*E6_PALETTE_RGB[0]) == INK_BLACK
+    def test_black_wire_hits_black_nibble(self):
+        assert esphome_ink_index(*E6_WIRE_RGB[0]) == INK_BLACK
 
-    def test_white_maps_to_white_zone(self):
-        assert esphome_ink_index(*E6_PALETTE_RGB[1]) == INK_WHITE
+    def test_white_wire_hits_white_nibble(self):
+        assert esphome_ink_index(*E6_WIRE_RGB[1]) == INK_WHITE
 
-    def test_green_maps_to_green_zone(self):
-        assert esphome_ink_index(*E6_PALETTE_RGB[2]) == INK_GREEN
+    def test_red_ink_wire_hits_yellow_nibble(self):
+        assert esphome_ink_index(*E6_WIRE_RGB[2]) == INK_YELLOW  # nibble 2 → Red physical
 
-    def test_blue_maps_to_blue_zone(self):
-        assert esphome_ink_index(*E6_PALETTE_RGB[3]) == INK_BLUE
+    def test_blue_ink_wire_hits_red_nibble(self):
+        assert esphome_ink_index(*E6_WIRE_RGB[3]) == INK_RED  # nibble 3 → Blue physical
 
-    def test_red_maps_to_red_zone(self):
-        assert esphome_ink_index(*E6_PALETTE_RGB[4]) == INK_RED
+    def test_green_ink_wire_hits_blue_nibble(self):
+        assert esphome_ink_index(*E6_WIRE_RGB[4]) == INK_BLUE  # nibble 5 → Green physical
 
-    def test_yellow_maps_to_yellow_zone(self):
-        assert esphome_ink_index(*E6_PALETTE_RGB[5]) == INK_YELLOW
-
-    def test_no_palette_colour_maps_to_orange(self):
-        for color in E6_PALETTE_RGB:
-            assert esphome_ink_index(*color) != INK_ORANGE, (
-                f"Palette colour {color} maps to Orange zone"
+    def test_no_wire_colour_uses_orange_nibble(self):
+        """nibble 6 (GREEN zone) shows as Red on this display — intentionally excluded."""
+        for color in E6_WIRE_RGB:
+            assert esphome_ink_index(*color) not in (INK_GREEN, INK_ORANGE), (
+                f"Wire colour {color} unexpectedly maps to Green/Orange nibble"
             )
 
-    def test_all_six_zones_covered(self):
-        zones = {esphome_ink_index(*c) for c in E6_PALETTE_RGB}
-        assert zones == {INK_BLACK, INK_WHITE, INK_GREEN, INK_BLUE, INK_RED, INK_YELLOW}
+    def test_all_required_nibbles_present(self):
+        nibbles = {esphome_ink_index(*c) for c in E6_WIRE_RGB}
+        assert nibbles == {INK_BLACK, INK_WHITE, INK_YELLOW, INK_RED, INK_BLUE}
 
 
 # ---------------------------------------------------------------------------
@@ -174,39 +176,40 @@ class TestDitheredImage:
 
     # ---- colour coverage ----
 
-    def test_all_six_colours_used(self, dithered_fs: Image.Image):
-        """A real photograph should use all six palette colours."""
+    def test_all_five_wire_colours_used(self, dithered_fs: Image.Image):
+        """A real photograph should use all five wire-format output colours."""
         arr = np.array(dithered_fs)
         unique = set(map(tuple, arr.reshape(-1, 3)))
-        missing = E6_PALETTE_SET - unique
-        assert not missing, f"Palette colours absent from dithered output: {missing}"
+        missing = E6_PALETTE_SET - unique  # E6_PALETTE_SET == E6_WIRE_SET
+        assert not missing, f"Wire colours absent from dithered output: {missing}"
 
     def test_no_single_colour_dominates(self, dithered_fs: Image.Image):
-        """No colour should exceed 70 % of pixels — sanity-checks dithering."""
+        """No wire colour should exceed 70 % of pixels — sanity-checks dithering."""
         arr = np.array(dithered_fs).reshape(-1, 3)
         n = len(arr)
-        for color in E6_PALETTE_RGB:
+        for color in E6_WIRE_RGB:
             count = int(np.sum(np.all(arr == color, axis=1)))
             frac = count / n
             assert frac < 0.70, (
-                f"Colour {color} dominates at {frac:.1%} of pixels — dithering may be broken"
+                f"Wire colour {color} dominates at {frac:.1%} of pixels"
             )
 
     # ---- ESPHome zone correctness on the actual image ----
 
-    def test_no_pixels_in_orange_zone(self, dithered_fs: Image.Image):
-        """No output pixel should land in ESPHome's Orange zone (ink index 6).
-
-        The Orange zone (R>127, G>85, G<=170) has no entry in our 6-colour
-        palette.  A hit here means a pixel would render as the wrong ink.
+    def test_no_pixels_in_excluded_zones(self, dithered_fs: Image.Image):
+        """No output pixel should land in the GREEN zone (nibble 6 → Red physical)
+        or the ORANGE zone (nibble 6 on 7-colour displays).  Both show as red,
+        duplicating the RED-ink zone and making green areas look red.
         """
         arr = np.array(dithered_fs).astype(int)
         r, g, b = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
-        orange = (r > 127) & (g > 85) & (g <= 170)
-        count = int(np.sum(orange))
-        assert count == 0, (
-            f"{count} pixels fall in the ESPHome Orange zone — "
-            "palette colour(s) misconfigured"
+        # GREEN zone: R≤128, G>128, B≤128 → nibble 6 → Red physical
+        green_zone = (r <= 128) & (g > 128) & (b <= 128)
+        # ORANGE zone: R>127, G>85, G≤170 → nibble 6
+        orange_zone = (r > 127) & (g > 85) & (g <= 170)
+        bad = int(np.sum(green_zone | orange_zone))
+        assert bad == 0, (
+            f"{bad} pixels fall in excluded ESPHome zones (would render as wrong ink)"
         )
 
     def test_output_dimensions_match_input(self, dithered_fs: Image.Image):
