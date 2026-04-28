@@ -69,6 +69,13 @@ export async function setClientPalette(clientId: string, palette: DitheringPalet
   }
 }
 
+export async function pushClientImage(clientId: string): Promise<void> {
+  const r = await fetch(`${BASE}/api/clients/${encodeURIComponent(clientId)}/push`, {
+    method: 'POST',
+  });
+  if (!r.ok) throw new Error(await r.text());
+}
+
 export async function connectClient(clientId: string): Promise<void> {
   const r = await fetch(`${BASE}/api/clients/${encodeURIComponent(clientId)}/connect`, {
     method: 'POST',

@@ -509,6 +509,48 @@ async def run(
             content_type="image/png",
         )
 
+    async def api_push_client_image(request: web.Request) -> web.Response:
+        """POST /api/clients/{id}/push — immediately push next image to a connected client."""
+        from sendspin_image_server.stream import push_image_to_client
+
+        client_id = request.match_info["id"]
+        client = server.clients.get(client_id)
+        if client is None:
+            return web.Response(status=404, text="Client not connected")
+
+        endpoint_id = registry.effective_endpoint_id(client_id)
+        endpoint = registry.get_endpoint(endpoint_id) if endpoint_id else None
+        if endpoint is None:
+            return web.Response(status=409, text="No endpoint assigned to this client")
+
+        try:
+            data = await endpoint.fetch_next()
+        except Exception as exc:
+            return web.Response(status=500, text=f"Endpoint fetch failed: {exc}")
+
+        if not data:
+            return web.Response(status=409, text="No image available from endpoint")
+
+        client_algo = registry.client_dither_algo(client_id)
+        client_palette = registry.client_dither_palette(client_id)
+        force_dither = client_algo != "none" and client_palette != "none"
+
+        try:
+            sent = await push_image_to_client(
+                client,
+                data,
+                0,
+                force_e6_dither=force_dither,
+                dither_algo=client_algo if force_dither else "none",
+                dither_palette=client_palette if force_dither else "e6",
+            )
+            if sent is not None:
+                server._last_image[client_id] = sent
+        except Exception as exc:
+            return web.Response(status=500, text=f"Push failed: {exc}")
+
+        return web.Response(status=204)
+
     async def api_connect_client(request: web.Request) -> web.Response:
         """POST /api/clients/{id}/connect — force (re)connect to a discovered client."""
         client_id = request.match_info["id"]
@@ -575,6 +617,7 @@ async def run(
     app.router.add_post("/api/clients/{id}/dither", api_set_client_dither)
     app.router.add_post("/api/clients/{id}/palette", api_set_client_palette)
     app.router.add_post("/api/clients/{id}/interval", api_set_client_interval)
+    app.router.add_post("/api/clients/{id}/push", api_push_client_image)
     app.router.add_post("/api/clients/{id}/connect", api_connect_client)
     app.router.add_get("/api/clients/{id}/debug-image", api_get_client_debug_image)
     app.router.add_delete("/api/clients/{id}", api_delete_client)

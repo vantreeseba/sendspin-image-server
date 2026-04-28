@@ -7,6 +7,7 @@ import {
   connectClient,
   deleteClient,
   getPresets,
+  pushClientImage,
   setClientDither,
   setClientInterval,
   setClientPalette,
@@ -64,6 +65,7 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
     client.interval > 0 ? String(client.interval) : '',
   );
   const [busy, setBusy] = useState(false);
+  const [pushing, setPushing] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [presets, setPresets] = useState<DevicePreset[]>([]);
@@ -126,6 +128,18 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handlePush() {
+    setPushing(true);
+    setErr(null);
+    try {
+      await pushClientImage(client.id);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPushing(false);
     }
   }
 
@@ -330,18 +344,33 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
           />
         )}
 
-        {/* Update button — only for connected clients */}
+        {/* Update + Push buttons — only for connected clients */}
         {!isDiscovered && (
-          <Button
-            size="sm"
-            onClick={handleUpdate}
-            disabled={busy || !isDirty || !intervalValid}
-            className="w-full text-xs"
-          >
-            {busy ? (
-              <><Loader2 className="mr-1 h-3 w-3 animate-spin" />Saving…</>
-            ) : 'Update'}
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              onClick={handleUpdate}
+              disabled={busy || !isDirty || !intervalValid}
+              className="flex-1 text-xs"
+            >
+              {busy ? (
+                <><Loader2 className="mr-1 h-3 w-3 animate-spin" />Saving…</>
+              ) : 'Update'}
+            </Button>
+            {client.status === 'connected' && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handlePush}
+                disabled={pushing}
+                className="flex-1 text-xs"
+              >
+                {pushing ? (
+                  <><Loader2 className="mr-1 h-3 w-3 animate-spin" />Pushing…</>
+                ) : 'Push Now'}
+              </Button>
+            )}
+          </div>
         )}
 
         {/* Force Connect — for discovered-only clients and disconnected (offline) clients */}
