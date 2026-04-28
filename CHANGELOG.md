@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.12.0 (2026-04-28)
+
+### Features
+
+- **ui**: Group clients by status and add test suite
+  ([`3cd0c4c`](https://github.com/vantreeseba/sendspin-image-server/commit/3cd0c4cfe42037bbc3fab63d320994aff0c37adc))
+
+
 ## v1.11.0 (2026-04-28)
 
 ### Features
