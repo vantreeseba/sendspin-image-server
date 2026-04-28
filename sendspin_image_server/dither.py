@@ -69,11 +69,12 @@ def _load_act(path: pathlib.Path) -> list[tuple[int, int, int]]:
 # Map ACT filename stem → (palette key, human label)
 # Keys become the palette identifiers used throughout the API and UI.
 _ACT_MAP: Final[dict[str, tuple[str, str]]] = {
-    "Black-White":        ("bw",     "Black & White"),
-    "Black-White-Red":    ("bwr",    "Black, White & Red"),
-    "Black-White-Yellow": ("bwy",    "Black, White & Yellow"),
-    "4-color":            ("4color", "4-Color"),
-    "N-color":            ("e6",     "E-Paper 7-Color (ACeP)"),
+    "Black-White":        ("bw",       "Black & White"),
+    "Black-White-Red":    ("bwr",      "Black, White & Red"),
+    "Black-White-Yellow": ("bwy",      "Black, White & Yellow"),
+    "4-color":            ("4color",   "4-Color"),
+    "N-color":            ("e6",       "E-Paper 7-Color (ACeP)"),
+    "N-color-bright":     ("e6bright", "E-Paper 7-Color Bright (+25%)"),
 }
 
 # Build palette registry from .act files at import time.
