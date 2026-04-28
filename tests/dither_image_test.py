@@ -22,6 +22,7 @@ from sendspin_image_server.dither import (
     DITHER_ALGOS,
     E6_PALETTE_RGB,
     E6_PALETTE_SET,
+    E6_WIRE_RGB,
     dither_to_pil,
 )
 
@@ -68,13 +69,15 @@ def esphome_ink_index(r: int, g: int, b: int) -> int:
     return INK_BLACK
 
 
-# Expected ink index for each of our 6 palette entries.
-# Keyed by (R,G,B) tuple; computed from E6_PALETTE_RGB at import time so
-# tests automatically reflect palette changes without needing manual updates.
-PALETTE_INK: dict[tuple[int, int, int], int] = {
+# Expected ESPHome nibble for each wire-format colour.
+# Keyed by (R,G,B) wire tuple; computed from E6_WIRE_RGB at import time.
+WIRE_INK: dict[tuple[int, int, int], int] = {
     (color[0], color[1], color[2]): esphome_ink_index(*color)
-    for color in E6_PALETTE_RGB
+    for color in E6_WIRE_RGB
 }
+
+# Backwards-compat alias for tests that reference PALETTE_INK
+PALETTE_INK = WIRE_INK
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -115,46 +118,52 @@ def dithered_atkinson(source_jpeg: bytes) -> Image.Image:
 
 
 class TestPaletteEsphomeZones:
-    """Verify each palette colour falls in the correct ESPHome ink zone.
+    """Verify each wire-format colour produces the correct ESPHome nibble.
 
-    Tests use E6_PALETTE_RGB directly (by index) so they remain correct
-    if the palette values change — no hardcoded RGB tuples here.
+    Calibration result (hardware-verified):
+      nibble 0 → Black, 1 → White, 2 → Red ink, 3 → Blue ink,
+      5 → Green ink, 6 → Orange/Red ink.
+      nibble 4 (SKIP_1) is unreachable — Yellow ink is inaccessible.
 
-    This is the most critical test: a wrong zone means a whole colour
-    renders as the wrong ink on the physical display.
+    Wire colours are designed to pass through color_to_hex() to the
+    correct nibble; that nibble then activates the correct physical ink.
     """
 
-    def test_black_maps_to_black_zone(self):
-        assert esphome_ink_index(*E6_PALETTE_RGB[0]) == INK_BLACK
+    def test_black_wire_maps_to_black_nibble(self):
+        assert esphome_ink_index(*E6_WIRE_RGB[0]) == INK_BLACK  # nibble 0
 
-    def test_white_maps_to_white_zone(self):
-        assert esphome_ink_index(*E6_PALETTE_RGB[1]) == INK_WHITE
+    def test_white_wire_maps_to_white_nibble(self):
+        assert esphome_ink_index(*E6_WIRE_RGB[1]) == INK_WHITE  # nibble 1
 
-    def test_green_maps_to_green_zone(self):
-        assert esphome_ink_index(*E6_PALETTE_RGB[2]) == INK_GREEN
+    def test_red_ink_wire_maps_to_yellow_nibble(self):
+        # (255,255,0) → YELLOW zone → nibble 2 → Red ink on display
+        assert esphome_ink_index(*E6_WIRE_RGB[2]) == INK_YELLOW
 
-    def test_blue_maps_to_blue_zone(self):
-        assert esphome_ink_index(*E6_PALETTE_RGB[3]) == INK_BLUE
+    def test_blue_ink_wire_maps_to_red_nibble(self):
+        # (255,0,0) → RED zone → nibble 3 → Blue ink on display
+        assert esphome_ink_index(*E6_WIRE_RGB[3]) == INK_RED
 
-    def test_red_maps_to_red_zone(self):
-        assert esphome_ink_index(*E6_PALETTE_RGB[4]) == INK_RED
+    def test_green_ink_wire_maps_to_blue_nibble(self):
+        # (0,0,255) → BLUE zone → nibble 5 → Green ink on display
+        assert esphome_ink_index(*E6_WIRE_RGB[4]) == INK_BLUE
 
-    def test_yellow_maps_to_yellow_zone(self):
-        assert esphome_ink_index(*E6_PALETTE_RGB[5]) == INK_YELLOW
+    def test_orange_ink_wire_maps_to_green_nibble(self):
+        # (0,255,0) → GREEN zone → nibble 6 → Orange ink on display
+        assert esphome_ink_index(*E6_WIRE_RGB[5]) == INK_GREEN
 
-    def test_no_palette_colour_maps_to_orange(self):
-        """Orange (index 6) is absent from the 6-colour palette."""
-        for color in E6_PALETTE_RGB:
+    def test_no_wire_colour_maps_to_orange_nibble(self):
+        """nibble 6 is used for Orange ink; no wire colour should hit the
+        Orange enum entry unexpectedly (it's intentionally used for Green zone)."""
+        for color in E6_WIRE_RGB:
             ink = esphome_ink_index(*color)
             assert ink != INK_ORANGE, (
-                f"Palette colour {color} maps to Orange zone — "
-                "it would render as the wrong ink on a 6-colour display"
+                f"Wire colour {color} unexpectedly maps to INK_ORANGE (nibble 6+)"
             )
 
-    def test_all_six_zones_covered(self):
-        """Every ink index 0-5 must have exactly one palette entry."""
-        used_zones = {esphome_ink_index(*c) for c in E6_PALETTE_RGB}
-        assert used_zones == {INK_BLACK, INK_WHITE, INK_GREEN, INK_BLUE, INK_RED, INK_YELLOW}
+    def test_all_required_nibbles_produced(self):
+        """Wire colours must produce nibbles 0,1,2,3,5,6 (no nibble 4 — unreachable)."""
+        nibbles = {esphome_ink_index(*c) for c in E6_WIRE_RGB}
+        assert nibbles == {INK_BLACK, INK_WHITE, INK_YELLOW, INK_RED, INK_BLUE, INK_GREEN}
 
 
 # ---------------------------------------------------------------------------
@@ -189,14 +198,14 @@ class TestDitheredImage:
         assert not missing, f"Palette colours absent from dithered output: {missing}"
 
     def test_no_single_colour_dominates(self, dithered_fs: Image.Image):
-        """No colour should exceed 70 % of pixels — sanity-checks the dithering."""
+        """No wire colour should exceed 70 % of pixels — sanity-checks dithering."""
         arr = np.array(dithered_fs).reshape(-1, 3)
         n = len(arr)
-        for color in E6_PALETTE_RGB:
+        for color in E6_WIRE_RGB:  # output pixels are wire-format colours
             count = int(np.sum(np.all(arr == color, axis=1)))
             frac = count / n
             assert frac < 0.70, (
-                f"Colour {color} dominates at {frac:.1%} of pixels — dithering may be broken"
+                f"Wire colour {color} dominates at {frac:.1%} of pixels — dithering may be broken"
             )
 
     # ---- ESPHome zone correctness on the actual image ----
