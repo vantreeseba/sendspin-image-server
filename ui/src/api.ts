@@ -69,6 +69,15 @@ export async function setClientPalette(clientId: string, palette: DitheringPalet
   }
 }
 
+export async function setClientLocked(clientId: string, locked: boolean): Promise<void> {
+  const r = await fetch(`${BASE}/api/clients/${encodeURIComponent(clientId)}/lock`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ locked }),
+  });
+  if (!r.ok) throw new Error(await r.text());
+}
+
 export async function pushClientImage(clientId: string): Promise<void> {
   const r = await fetch(`${BASE}/api/clients/${encodeURIComponent(clientId)}/push`, {
     method: 'POST',

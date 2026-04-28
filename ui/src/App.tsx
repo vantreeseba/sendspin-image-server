@@ -9,6 +9,7 @@ import { EditDevicePresetDialog } from '@/components/EditDevicePresetDialog';
 import { EndpointCard } from '@/components/EndpointCard';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { usePoller } from '@/hooks/usePoller';
 import { useTheme } from '@/hooks/useTheme';
 import type { DevicePreset } from '@/types';
@@ -17,6 +18,7 @@ export default function App() {
   const [addOpen, setAddOpen] = useState(false);
   const [addPresetOpen, setAddPresetOpen] = useState(false);
   const [editingPreset, setEditingPreset] = useState<DevicePreset | null>(null);
+  const [tab, setTab] = useState<'clients' | 'settings'>('clients');
   const { theme, toggle } = useTheme();
 
   const fetchClients = useCallback(() => getClients(), []);
@@ -62,116 +64,119 @@ export default function App() {
           </Button>
         </div>
 
-        <Separator />
+        <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
+          <TabsList>
+            <TabsTrigger value="clients">Clients</TabsTrigger>
+            <TabsTrigger value="settings">Settings</TabsTrigger>
+          </TabsList>
 
-        {/* Clients */}
-        <section className="space-y-3">
-          <h2 className="font-semibold text-muted-foreground text-xs uppercase tracking-wider">
-            Clients
-          </h2>
-          {!clients ? (
-            <p className="text-muted-foreground text-sm">Loading…</p>
-          ) : clients.length === 0 ? (
-            <p className="text-muted-foreground text-sm">No clients discovered.</p>
-          ) : (
-            (() => {
-              const connected = clients.filter((c) => c.status === 'connected');
-              const offline = clients.filter((c) => !c.discovered_only && c.status !== 'connected');
-              const discovered = clients.filter((c) => c.discovered_only);
-              return (
-                <div className="space-y-5">
-                  {connected.length > 0 && (
-                    <div className="space-y-2">
-                      <p className="text-[11px] font-medium uppercase tracking-wider text-green-500/80">
-                        Active ({connected.length})
-                      </p>
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        {connected.map((c) => (
-                          <ClientCard key={c.id} client={c} endpoints={endpoints ?? []} onChanged={refresh} />
-                        ))}
+          {/* ── Clients tab ── */}
+          <TabsContent value="clients" className="mt-4 space-y-3">
+            {!clients ? (
+              <p className="text-muted-foreground text-sm">Loading…</p>
+            ) : clients.length === 0 ? (
+              <p className="text-muted-foreground text-sm">No clients discovered.</p>
+            ) : (
+              (() => {
+                const connected = clients.filter((c) => c.status === 'connected');
+                const offline = clients.filter((c) => !c.discovered_only && c.status !== 'connected');
+                const discovered = clients.filter((c) => c.discovered_only);
+                return (
+                  <div className="space-y-5">
+                    {connected.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-[11px] font-medium uppercase tracking-wider text-green-500/80">
+                          Active ({connected.length})
+                        </p>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          {connected.map((c) => (
+                            <ClientCard key={c.id} client={c} endpoints={endpoints ?? []} onChanged={refresh} />
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  )}
-                  {offline.length > 0 && (
-                    <div className="space-y-2">
-                      <p className="text-[11px] font-medium uppercase tracking-wider text-amber-500/80">
-                        Disconnected ({offline.length})
-                      </p>
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        {offline.map((c) => (
-                          <ClientCard key={c.id} client={c} endpoints={endpoints ?? []} onChanged={refresh} />
-                        ))}
+                    )}
+                    {offline.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-[11px] font-medium uppercase tracking-wider text-amber-500/80">
+                          Disconnected ({offline.length})
+                        </p>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          {offline.map((c) => (
+                            <ClientCard key={c.id} client={c} endpoints={endpoints ?? []} onChanged={refresh} />
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  )}
-                  {discovered.length > 0 && (
-                    <div className="space-y-2">
-                      <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
-                        Discovered ({discovered.length})
-                      </p>
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        {discovered.map((c) => (
-                          <ClientCard key={c.id} client={c} endpoints={endpoints ?? []} onChanged={refresh} />
-                        ))}
+                    )}
+                    {discovered.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
+                          Discovered ({discovered.length})
+                        </p>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          {discovered.map((c) => (
+                            <ClientCard key={c.id} client={c} endpoints={endpoints ?? []} onChanged={refresh} />
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
+                );
+              })()
+            )}
+          </TabsContent>
+
+          {/* ── Settings tab ── */}
+          <TabsContent value="settings" className="mt-4 space-y-8">
+            {/* Image Providers */}
+            <section className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="font-semibold text-muted-foreground text-xs uppercase tracking-wider">
+                  Image Providers
+                </h2>
+                <Button size="sm" onClick={() => setAddOpen(true)}>
+                  + Add provider
+                </Button>
+              </div>
+              {!endpoints || endpoints.length === 0 ? (
+                <p className="text-muted-foreground text-sm">No image providers configured.</p>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {endpoints.map((ep) => (
+                    <EndpointCard key={ep.id} endpoint={ep} onChanged={refresh} />
+                  ))}
                 </div>
-              );
-            })()
-          )}
-        </section>
+              )}
+            </section>
 
-        <Separator />
+            <Separator />
 
-        {/* Image Providers */}
-        <section className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="font-semibold text-muted-foreground text-xs uppercase tracking-wider">
-              Image Providers
-            </h2>
-            <Button size="sm" onClick={() => setAddOpen(true)}>
-              + Add provider
-            </Button>
-          </div>
-          {!endpoints || endpoints.length === 0 ? (
-            <p className="text-muted-foreground text-sm">No image providers configured.</p>
-          ) : (
-            <div className="grid gap-3 sm:grid-cols-2">
-              {endpoints.map((ep) => (
-                <EndpointCard key={ep.id} endpoint={ep} onChanged={refresh} />
-              ))}
-            </div>
-          )}
-        </section>
-
-        <Separator />
-
-        {/* Device Presets */}
-        <section className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="font-semibold text-muted-foreground text-xs uppercase tracking-wider">
-              Device Presets
-            </h2>
-            <Button size="sm" onClick={() => setAddPresetOpen(true)}>
-              + Add preset
-            </Button>
-          </div>
-          {!presets || presets.length === 0 ? (
-            <p className="text-muted-foreground text-sm">No device presets created.</p>
-          ) : (
-            <div className="grid gap-3 sm:grid-cols-2">
-              {presets.map((preset) => (
-                <DevicePresetCard
-                  key={preset.id}
-                  preset={preset}
-                  onChanged={refresh}
-                  onEdit={(p) => setEditing(p)}
-                />
-              ))}
-            </div>
-          )}
-        </section>
+            {/* Device Presets */}
+            <section className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="font-semibold text-muted-foreground text-xs uppercase tracking-wider">
+                  Device Presets
+                </h2>
+                <Button size="sm" onClick={() => setAddPresetOpen(true)}>
+                  + Add preset
+                </Button>
+              </div>
+              {!presets || presets.length === 0 ? (
+                <p className="text-muted-foreground text-sm">No device presets created.</p>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {presets.map((preset) => (
+                    <DevicePresetCard
+                      key={preset.id}
+                      preset={preset}
+                      onChanged={refresh}
+                      onEdit={(p) => setEditing(p)}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
+          </TabsContent>
+        </Tabs>
       </div>
 
       {/* Add Preset Dialog */}

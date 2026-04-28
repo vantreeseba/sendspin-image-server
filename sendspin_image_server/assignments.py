@@ -50,6 +50,7 @@ class ClientAssignmentManager:
         self._client_palette: dict[str, DitheringPalette] = {}
         self._client_interval: dict[str, float] = {}
         self._client_last_url: dict[str, str] = {}
+        self._client_locked: dict[str, bool] = {}
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._default_endpoint_id: str | None = _default_endpoint_id
         # Mutable references to registry-owned dicts (set before this is constructed)
@@ -211,6 +212,24 @@ class ClientAssignmentManager:
         if self._db is not None:
             asyncio.create_task(self._db.delete_assignment(client_id))
 
+    def set_client_locked(self, client_id: str, locked: bool) -> None:
+        """Lock or unlock a client. Locked clients are auto-reconnected on discovery."""
+        self._client_locked[client_id] = locked
+        if self._db is not None:
+            asyncio.create_task(self._db.set_client_locked(client_id, locked))
+        logger.info("Client %s locked=%s", client_id, locked)
+
+    def is_client_locked(self, client_id: str) -> bool:
+        return self._client_locked.get(client_id, False)
+
+    def locked_clients_with_urls(self) -> list[tuple[str, str]]:
+        """Return [(client_id, url)] for all locked clients that have a known URL."""
+        return [
+            (cid, url)
+            for cid, url in self._client_last_url.items()
+            if self._client_locked.get(cid, False)
+        ]
+
     def delete_client(self, client_id: str) -> None:
         """Forget a client entirely — removes DB record and in-memory state."""
         if self._db is not None:
@@ -218,6 +237,7 @@ class ClientAssignmentManager:
         self._assignments.pop(client_id, None)
         self._preset_assignments.pop(client_id, None)
         self._client_last_url.pop(client_id, None)
+        self._client_locked.pop(client_id, None)
 
     def effective_endpoint_id(self, client_id: str) -> str | None:
         return self._assignments.get(client_id, self._default_endpoint_id)
@@ -267,6 +287,7 @@ class ClientAssignmentManager:
                     "discovered_url": None,
                     "discovered_only": False,
                     "mdns_name": None,
+                    "locked": self.is_client_locked(client.client_id),
                 }
             )
 
@@ -312,6 +333,7 @@ class ClientAssignmentManager:
                 "discovered_url": url,
                 "discovered_only": not has_db_record,
                 "mdns_name": mdns_name,
+                "locked": self.is_client_locked(entry_id),
             }
             if has_db_record:
                 offline_db.append(entry_dict)
@@ -344,6 +366,7 @@ class ClientAssignmentManager:
                     "discovered_url": last_url,
                     "discovered_only": False,
                     "mdns_name": None,
+                    "locked": self.is_client_locked(db_client_id),
                 }
             )
 

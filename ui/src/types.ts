@@ -49,6 +49,7 @@ export interface Client {
   discovered_url?: string | null;
   discovered_only: boolean;
   mdns_name?: string | null;
+  locked: boolean;
   preset_id?: string | null;
 }
 

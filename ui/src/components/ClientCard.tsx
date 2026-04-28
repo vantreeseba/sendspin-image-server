@@ -1,4 +1,4 @@
-import { Eye, Loader2 } from 'lucide-react';
+import { Eye, Loader2, Lock, LockOpen } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import {
@@ -10,6 +10,7 @@ import {
   pushClientImage,
   setClientDither,
   setClientInterval,
+  setClientLocked,
   setClientPalette,
 } from '@/api';
 import { ClientDebugPreviewDialog } from '@/components/ClientDebugPreviewDialog';
@@ -68,6 +69,7 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
   const [pushing, setPushing] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [locking, setLocking] = useState(false);
   const [presets, setPresets] = useState<DevicePreset[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [debugOpen, setDebugOpen] = useState(false);
@@ -143,6 +145,19 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
     }
   }
 
+  async function handleToggleLock() {
+    setLocking(true);
+    setErr(null);
+    try {
+      await setClientLocked(client.id, !client.locked);
+      onChanged();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLocking(false);
+    }
+  }
+
   async function handleConnect() {
     setConnecting(true);
     setErr(null);
@@ -212,6 +227,22 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
                 Offline
               </Badge>
             )}
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 w-7 shrink-0 p-0"
+              title={client.locked ? 'Locked — click to unlock' : 'Unlocked — click to lock'}
+              onClick={handleToggleLock}
+              disabled={locking}
+            >
+              {locking ? (
+                <Loader2 className="h-4 w-4 animate-spin text-foreground/50" />
+              ) : client.locked ? (
+                <Lock className="h-4 w-4 text-amber-400" />
+              ) : (
+                <LockOpen className="h-4 w-4 text-foreground/30" />
+              )}
+            </Button>
             <Button
               size="sm"
               variant="ghost"

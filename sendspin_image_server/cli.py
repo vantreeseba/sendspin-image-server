@@ -11,7 +11,7 @@ import os
 import pathlib
 import signal
 import uuid
-from typing import Any
+from typing import Any  # noqa: F401
 
 from sendspin_image_server.db import Database
 from sendspin_image_server.dither import (
@@ -63,9 +63,24 @@ async def run(
     mdns = MDNSAdvertiser(name=name, ws_port=port)
     await mdns.start()
 
+    def _on_client_added(url: str, mdns_name: str | None = None) -> None:
+        server.connect_to_client(url, mdns_name=mdns_name)
+
+    def _on_client_removed(url: str) -> None:
+        # Only cancel the outbound connection if the client is not locked.
+        # Locked clients keep their outbound task alive so they reconnect
+        # as soon as the device is reachable again.
+        client_id = server._url_to_client_id.get(url)
+        if client_id and registry_ref[0] and registry_ref[0].is_client_locked(client_id):
+            logger.info("Locked client %s lost mDNS — keeping outbound task alive", client_id)
+            return
+        server.disconnect_from_client(url)
+
+    registry_ref: list[Any] = [None]  # forward reference filled after registry is created
+
     discovery = MDNSDiscovery(
-        on_client_added=server.connect_to_client,
-        on_client_removed=server.disconnect_from_client,
+        on_client_added=_on_client_added,
+        on_client_removed=_on_client_removed,
     )
     await discovery.start()
 
@@ -101,6 +116,14 @@ async def run(
 
     # Restore previously saved endpoints + assignments from DB
     await registry.restore_from_db(builtin_endpoint_id=_BUILTIN_LOCAL_ENDPOINT_ID)
+
+    # Wire the registry forward reference used by the mDNS removed callback.
+    registry_ref[0] = registry
+
+    # Auto-connect any locked clients whose last-known URL was restored.
+    for _cid, _url in registry.locked_clients_with_urls():
+        logger.info("Auto-connecting locked client %s → %s", _cid, _url)
+        server.connect_to_client(_url)
 
     # Give the server a back-reference to the registry so it can persist
     # each client's last-known WebSocket URL on successful hello handshake.
@@ -566,6 +589,27 @@ async def run(
         server.reconnect_to_client(discovered_url, connection_reason="playback")
         return web.Response(status=204)
 
+    async def api_lock_client(request: web.Request) -> web.Response:
+        """POST /api/clients/{id}/lock  body: {locked: bool}."""
+        client_id = request.match_info["id"]
+        try:
+            body = await request.json()
+        except Exception:
+            return web.Response(status=400, text="Invalid JSON")
+        locked = body.get("locked")
+        if not isinstance(locked, bool):
+            return web.Response(status=400, text="'locked' must be a boolean")
+        registry.set_client_locked(client_id, locked)
+        if locked:
+            # If we know the URL and the client isn't already connected, auto-connect now.
+            clients = registry.client_info()
+            entry = next((c for c in clients if c["id"] == client_id), None)
+            if entry and entry.get("status") != "connected":
+                url = entry.get("discovered_url")
+                if url:
+                    server.reconnect_to_client(url, connection_reason="lock")
+        return web.Response(status=204)
+
     async def api_delete_client(request: web.Request) -> web.Response:
         """DELETE /api/clients/{id} — forget a client entirely."""
         client_id = request.match_info["id"]
@@ -618,6 +662,7 @@ async def run(
     app.router.add_post("/api/clients/{id}/palette", api_set_client_palette)
     app.router.add_post("/api/clients/{id}/interval", api_set_client_interval)
     app.router.add_post("/api/clients/{id}/push", api_push_client_image)
+    app.router.add_post("/api/clients/{id}/lock", api_lock_client)
     app.router.add_post("/api/clients/{id}/connect", api_connect_client)
     app.router.add_get("/api/clients/{id}/debug-image", api_get_client_debug_image)
     app.router.add_delete("/api/clients/{id}", api_delete_client)

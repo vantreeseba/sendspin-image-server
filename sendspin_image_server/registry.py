@@ -257,6 +257,15 @@ class EndpointRegistry:
     def ensure_client(self, client_id: str, name: str, url: str | None = None) -> None:
         self._assignments.ensure_client(client_id, name, url)
 
+    def set_client_locked(self, client_id: str, locked: bool) -> None:
+        self._assignments.set_client_locked(client_id, locked)
+
+    def is_client_locked(self, client_id: str) -> bool:
+        return self._assignments.is_client_locked(client_id)
+
+    def locked_clients_with_urls(self) -> list[tuple[str, str]]:
+        return self._assignments.locked_clients_with_urls()
+
     # -- effective values --
 
     def effective_endpoint_id(self, client_id: str) -> str | None:
@@ -277,12 +286,14 @@ class EndpointRegistry:
             return
         db = self._assignments._db
 
-        # Restore client last-known URLs
+        # Restore client last-known URLs and locked state
         client_urls = await db.load_client_urls()
         for cid, data in client_urls.items():
             url = data.get("last_known_url")
             if url:
-                self._assignments._client_last_url[cid] = url
+                self._assignments._client_last_url[cid] = str(url)
+            if data.get("locked"):
+                self._assignments._client_locked[cid] = True
 
         # Restore endpoints (same logic as old registry.py)
         rows = await db.load_endpoints()

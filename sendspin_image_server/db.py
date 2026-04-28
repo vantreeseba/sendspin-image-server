@@ -71,7 +71,8 @@ CREATE TABLE IF NOT EXISTS assignments (
 CREATE TABLE IF NOT EXISTS clients (
     client_id      TEXT PRIMARY KEY,
     name           TEXT NOT NULL DEFAULT '',
-    last_known_url TEXT
+    last_known_url TEXT,
+    locked         INTEGER NOT NULL DEFAULT 0
 );
 """
 
@@ -81,6 +82,7 @@ _MIGRATION_ADD_PALETTE = (
 )
 _MIGRATION_ADD_LAST_KNOWN_URL = "ALTER TABLE clients ADD COLUMN last_known_url TEXT"
 _MIGRATION_ADD_PRESET_ID = "ALTER TABLE assignments ADD COLUMN preset_id TEXT"
+_MIGRATION_ADD_LOCKED = "ALTER TABLE clients ADD COLUMN locked INTEGER NOT NULL DEFAULT 0"
 
 
 class Database:
@@ -101,6 +103,7 @@ class Database:
             _MIGRATION_ADD_PALETTE,
             _MIGRATION_ADD_LAST_KNOWN_URL,
             _MIGRATION_ADD_PRESET_ID,
+            _MIGRATION_ADD_LOCKED,
         ):
             try:
                 await self._db.execute(migration)
@@ -310,18 +313,34 @@ class Database:
         )
         await self._db.commit()
 
-    async def load_client_urls(self) -> dict[str, dict[str, str | None]]:
-        """Return {client_id: {name, last_known_url}} for all persisted clients."""
+    async def load_client_urls(self) -> dict[str, dict[str, str | None | bool]]:
+        """Return {client_id: {name, last_known_url, locked}} for all persisted clients."""
         assert self._db is not None
-        async with self._db.execute("SELECT client_id, name, last_known_url FROM clients") as cur:
+        async with self._db.execute(
+            "SELECT client_id, name, last_known_url, locked FROM clients"
+        ) as cur:
             rows = await cur.fetchall()
         return {
             row["client_id"]: {
                 "name": row["name"],
                 "last_known_url": row["last_known_url"],
+                "locked": bool(row["locked"]),
             }
             for row in rows
         }
+
+    async def set_client_locked(self, client_id: str, locked: bool) -> None:
+        """Set the locked flag for a client (upsert — creates the row if absent)."""
+        assert self._db is not None
+        await self._db.execute(
+            """
+            INSERT INTO clients (client_id, locked)
+            VALUES (?, ?)
+            ON CONFLICT(client_id) DO UPDATE SET locked=excluded.locked
+            """,
+            (client_id, int(locked)),
+        )
+        await self._db.commit()
 
     async def delete_client(self, client_id: str) -> None:
         """Remove a client and its assignment from the database."""
