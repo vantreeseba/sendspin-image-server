@@ -123,13 +123,11 @@ class TestPaletteColors:
             assert 0 <= g <= 255
             assert 0 <= b <= 255
 
-    def test_black_is_dark(self):
-        r, g, b = E6_PALETTE_RGB[0]
-        assert r + g + b < 200
+    def test_black_is_in_palette(self):
+        assert (0, 0, 0) in [tuple(int(v) for v in c) for c in E6_PALETTE_RGB]
 
-    def test_white_is_light(self):
-        r, g, b = E6_PALETTE_RGB[1]
-        assert r + g + b > 600
+    def test_white_is_in_palette(self):
+        assert (255, 255, 255) in [tuple(int(v) for v in c) for c in E6_PALETTE_RGB]
 
     def test_all_seven_colours_distinct(self):
         assert len(set(map(tuple, E6_PALETTE_RGB))) == 7

@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import io
 import logging
+import pathlib
 from typing import Final, Literal
 
 import numpy as np
@@ -37,48 +38,83 @@ from PIL import Image, ImageEnhance
 
 logger = logging.getLogger(__name__)
 
+_TABLES_DIR: Final[pathlib.Path] = pathlib.Path(__file__).parent / "tables"
+
 # ---------------------------------------------------------------------------
 # Section 1 — constants / palettes
 # ---------------------------------------------------------------------------
 
-DitheringPalette = Literal["none", "bw", "e6"]
-DITHER_PALETTES: Final[tuple[str, ...]] = ("none", "bw", "e6")
+# ---------------------------------------------------------------------------
+# ACT loader
+# ---------------------------------------------------------------------------
+
+def _load_act(path: pathlib.Path) -> list[tuple[int, int, int]]:
+    """Load an Adobe Color Table (.act) file and return its colour list.
+
+    ACT format: 768 bytes of 256 RGB triples.  An optional 4-byte trailer
+    holds a 2-byte colour count and 2-byte transparent-colour index.
+    """
+    data = path.read_bytes()
+    n = int.from_bytes(data[768:770], "big") if len(data) >= 770 else 256
+    palette: list[tuple[int, int, int]] = []
+    seen: set[tuple[int, int, int]] = set()
+    for i in range(0, min(768, n * 3), 3):
+        c = (int(data[i]), int(data[i + 1]), int(data[i + 2]))
+        if c not in seen:
+            seen.add(c)
+            palette.append(c)
+    return palette
+
+
+# Map ACT filename stem → (palette key, human label)
+# Keys become the palette identifiers used throughout the API and UI.
+_ACT_MAP: Final[dict[str, tuple[str, str]]] = {
+    "Black-White":        ("bw",     "Black & White"),
+    "Black-White-Red":    ("bwr",    "Black, White & Red"),
+    "Black-White-Yellow": ("bwy",    "Black, White & Yellow"),
+    "4-color":            ("4color", "4-Color"),
+    "N-color":            ("e6",     "E-Paper 7-Color (ACeP)"),
+}
+
+# Build palette registry from .act files at import time.
+# Any .act file in tables/ that isn't in _ACT_MAP gets a key derived from its stem.
+_LOADED_PALETTES: dict[str, list[tuple[int, int, int]]] = {}
+_LOADED_LABELS:   dict[str, str] = {}
+
+for _act_path in sorted(_TABLES_DIR.glob("*.act")):
+    _stem = _act_path.stem
+    if _stem in _ACT_MAP:
+        _key, _label = _ACT_MAP[_stem]
+    else:
+        _key   = _stem.lower().replace("-", "_").replace(" ", "_")
+        _label = _stem.replace("-", " ")
+    try:
+        _LOADED_PALETTES[_key] = _load_act(_act_path)
+        _LOADED_LABELS[_key]   = _label
+    except Exception as _e:
+        logger.warning("Failed to load palette %r from %s: %s", _key, _act_path, _e)
+
+# "none" is always available — no quantisation, full colour passthrough.
+DitheringPalette = Literal["none", "bw", "bwr", "bwy", "4color", "e6"]
+DITHER_PALETTES: Final[tuple[str, ...]] = ("none",) + tuple(_LOADED_PALETTES)
 
 PALETTE_LABELS: Final[dict[str, str]] = {
     "none": "Full Color (no dithering)",
-    "bw": "Black & White",
-    "e6": "E-Paper 6-Color",
+    **_LOADED_LABELS,
 }
 
-BW_PALETTE_RGB: Final[list[tuple[int, int, int]]] = [
-    (0,   0,   0),    # 0 Black
-    (255, 255, 255),  # 1 White
-]
+# Convenience aliases kept for backwards compatibility
+BW_PALETTE_RGB: Final[list[tuple[int, int, int]]] = _LOADED_PALETTES["bw"]
+E6_PALETTE_RGB: Final[list[tuple[int, int, int]]] = _LOADED_PALETTES["e6"]
 
-# Exact RGB values used by Waveshare's official epd7in3f/epd5in65f drivers in
-# their getbuffer() palette.  These are the 7-colour ACeP primaries; the display
-# controller maps each 4-bit index to the corresponding physical ink.
-E6_PALETTE_RGB: Final[list[tuple[int, int, int]]] = [
-    (0,   0,   0),    # 0 Black
-    (255, 255, 255),  # 1 White
-    (0,   255, 0),    # 2 Green
-    (0,   0,   255),  # 3 Blue
-    (255, 0,   0),    # 4 Red
-    (255, 255, 0),    # 5 Yellow
-    (255, 128, 0),    # 6 Orange
-]
+PALETTE_RGB: Final[dict[str, list[tuple[int, int, int]]]] = dict(_LOADED_PALETTES)
 
-PALETTE_RGB: Final[dict[str, list[tuple[int, int, int]]]] = {
-    "bw": BW_PALETTE_RGB,
-    "e6": E6_PALETTE_RGB,
-}
-
-E6_PALETTE_SET: Final[frozenset[tuple[int, int, int]]] = frozenset(map(tuple, E6_PALETTE_RGB))
-BW_PALETTE_SET: Final[frozenset[tuple[int, int, int]]] = frozenset(map(tuple, BW_PALETTE_RGB))
 PALETTE_SETS: Final[dict[str, frozenset[tuple[int, int, int]]]] = {
-    "bw": BW_PALETTE_SET,
-    "e6": E6_PALETTE_SET,
+    key: frozenset(map(tuple, rgb)) for key, rgb in PALETTE_RGB.items()
 }
+
+E6_PALETTE_SET: Final[frozenset[tuple[int, int, int]]] = PALETTE_SETS["e6"]
+BW_PALETTE_SET: Final[frozenset[tuple[int, int, int]]] = PALETTE_SETS["bw"]
 
 DitheringAlgo = Literal["none", "floyd-steinberg", "floyd-steinberg-serpentine", "atkinson", "ordered"]
 DITHER_ALGOS: Final[tuple[str, ...]] = (

@@ -33,7 +33,7 @@ where = ["."]
 include = ["sendspin_image_server*"]
 
 [tool.setuptools.package-data]
-sendspin_image_server = ["ui_dist/**/*"]
+sendspin_image_server = ["ui_dist/**/*", "tables/*.act"]
 
 [tool.ruff]
 fix = true
