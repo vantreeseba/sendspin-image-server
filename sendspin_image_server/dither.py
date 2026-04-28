@@ -52,17 +52,28 @@ BW_PALETTE_RGB: Final[list[tuple[int, int, int]]] = [
     (255, 255, 255),  # 1 White
 ]
 
-# Measured physical ink colors for the Waveshare Spectra E6 (PhotoPainter /
-# ESP32-S3-PhotoPainter). These are the actual on-screen hues, not idealised
-# primaries. Using physical values gives accurate error-diffusion targets so
-# that the dithered image looks correct on the real hardware.
+# Palette calibrated for the Waveshare Spectra E6 with ESPHome rendering.
+#
+# ESPHome's Waveshare ACeP driver uses a threshold decision tree to map each
+# pixel to an ink index (not nearest-neighbour):
+#   Black  : R≤127, G≤127, B≤127
+#   White  : R>127, G>170, B>127
+#   Green  : R≤127, G>127, B≤127
+#   Blue   : R≤127, B>127  (G≤127 or G>127)
+#   Red    : R>127, G≤85
+#   Yellow : R>127, G>170, B≤127
+#
+# Physical ink measurements are used where they already fall in the correct
+# zone. Green ink measures ~(18,95,32) physically, but G=95 < 127 would
+# route those pixels to Black — so we use (0,155,0) which is in the correct
+# zone while still representing a dark green for accurate error diffusion.
 E6_PALETTE_RGB: Final[list[tuple[int, int, int]]] = [
-    (25,  30,  33),   # 0 Black
-    (232, 232, 232),  # 1 White
-    (18,  95,  32),   # 2 Green
-    (33,  87,  186),  # 3 Blue
-    (178, 19,  24),   # 4 Red
-    (239, 222, 68),   # 5 Yellow
+    (25,  30,  33),   # 0 Black   — physical ink, correctly in Black zone
+    (232, 232, 232),  # 1 White   — physical ink, correctly in White zone
+    (0,   155, 0),    # 2 Green   — G=155>127, in Green zone; physical G=95 falls into Black
+    (33,  87,  186),  # 3 Blue    — physical ink, correctly in Blue zone
+    (178, 19,  24),   # 4 Red     — physical ink, correctly in Red zone
+    (239, 222, 68),   # 5 Yellow  — physical ink, correctly in Yellow zone
 ]
 
 PALETTE_RGB: Final[dict[str, list[tuple[int, int, int]]]] = {

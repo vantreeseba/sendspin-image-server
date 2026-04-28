@@ -1,4 +1,4 @@
-import { Eye } from 'lucide-react';
+import { Eye, Loader2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import {
@@ -214,7 +214,9 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
               disabled={deleting}
               className="shrink-0 border-red-800 text-red-400 text-xs hover:bg-red-900/20"
             >
-              {deleting ? '…' : 'Forget'}
+              {deleting ? (
+                <><Loader2 className="mr-1 h-3 w-3 animate-spin" />Forgetting…</>
+              ) : 'Forget'}
             </Button>
           </div>
         </div>
@@ -336,7 +338,9 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
             disabled={busy || !isDirty || !intervalValid}
             className="w-full text-xs"
           >
-            Update
+            {busy ? (
+              <><Loader2 className="mr-1 h-3 w-3 animate-spin" />Saving…</>
+            ) : 'Update'}
           </Button>
         )}
 
@@ -349,7 +353,9 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
             disabled={connecting}
             className="mt-2 w-full text-xs"
           >
-            {connecting ? 'Connecting…' : 'Force Connect'}
+            {connecting ? (
+              <><Loader2 className="mr-1 h-3 w-3 animate-spin" />Connecting…</>
+            ) : 'Force Connect'}
           </Button>
         )}
 

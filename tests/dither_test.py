@@ -62,8 +62,8 @@ class TestPaletteConstants:
         assert len(E6_PALETTE_RGB) == 6
 
     def test_e6_palette_contains_expected_colors(self):
-        # Physical ink colors for the Waveshare Spectra E6 (PhotoPainter)
-        expected = [(25, 30, 33), (232, 232, 232), (18, 95, 32),
+        # Calibrated for ESPHome Waveshare ACeP threshold quantization
+        expected = [(25, 30, 33), (232, 232, 232), (0, 155, 0),
                     (33, 87, 186), (178, 19, 24), (239, 222, 68)]
         for c in expected:
             assert c in E6_PALETTE_RGB
@@ -272,8 +272,8 @@ class TestNearest:
             assert (r, g, b) == color
 
     def test_physical_green_snaps_to_green(self):
-        r, g, b = _nearest(18, 95, 32, "e6")
-        assert (r, g, b) == (18, 95, 32)
+        r, g, b = _nearest(0, 155, 0, "e6")
+        assert (r, g, b) == (0, 155, 0)
 
     def test_physical_blue_snaps_to_blue(self):
         r, g, b = _nearest(33, 87, 186, "e6")
