@@ -2,8 +2,9 @@
 
 Supported algorithms (select via the *algo* argument):
 
-  floyd-steinberg               — error-diffusion, alternating row direction (Lab LUT)
-  floyd-steinberg-serpentine    — same as floyd-steinberg (alias)
+  floyd-steinberg               — PIL's built-in Floyd-Steinberg (C implementation,
+                                  mirrors Waveshare's official getbuffer() approach)
+  floyd-steinberg-serpentine    — alias for floyd-steinberg
   atkinson                      — Bill Atkinson's 3/4-error diffusion (Lab LUT)
   ordered                       — 8×8 Bayer ordered/threshold dithering (Lab LUT)
   none                          — no dithering at all (pure passthrough, no preprocessing)
@@ -12,14 +13,16 @@ Supported palettes:
 
   none  — no palette restriction (full color, dithering disabled)
   bw    — black and white (binary; two-color)
-  e6    — 7.3" e-Paper E six-color ACeP palette (Black, White, Green, Blue, Red, Yellow)
+  e6    — Waveshare Spectra E6 six-color palette (Black, White, Green, Blue, Red, Yellow)
 
-All palette-based algorithms use the same nearest-colour lookup: a per-palette
-6-bit-per-channel LUT (262 144 entries, built on first use) that maps any 8-bit
-RGB triple to the closest palette index using CIE L*a*b* distance. Each bucket
-covers 4 raw sRGB values (±2 counts max error per channel).
+Floyd-Steinberg uses PIL's quantize() — the same method as Waveshare's official Python
+driver — with the pure primary/secondary palette colours. PIL's C implementation is
+significantly faster than a pure-Python loop and produces identical quality.
 
- The dithered image is returned as a PIL RGB Image; callers that need bytes use
+Atkinson and Ordered use a per-palette 6-bit-per-channel Lab LUT (262 144 entries)
+that maps any 8-bit RGB triple to the closest palette index via CIE ΔE².
+
+The dithered image is returned as a PIL RGB Image; callers that need bytes use
 dither_to_pil() / encode_pil().
 """
 
@@ -52,28 +55,24 @@ BW_PALETTE_RGB: Final[list[tuple[int, int, int]]] = [
     (255, 255, 255),  # 1 White
 ]
 
-# Palette calibrated for the Waveshare Spectra E6 with ESPHome rendering.
+# Pure primary/secondary colours used by Waveshare's official e-Paper Python driver
+# (epd7in3f.py, epd5in65f.py) for their getbuffer() palette quantisation.
 #
-# ESPHome's Waveshare ACeP driver uses a threshold decision tree to map each
-# pixel to an ink index (not nearest-neighbour):
-#   Black  : R≤127, G≤127, B≤127
-#   White  : R>127, G>170, B>127
-#   Green  : R≤127, G>127, B≤127
-#   Blue   : R≤127, B>127  (G≤127 or G>127)
-#   Red    : R>127, G≤85
-#   Yellow : R>127, G>170, B≤127
-#
-# Physical ink measurements are used where they already fall in the correct
-# zone. Green ink measures ~(18,95,32) physically, but G=95 < 127 would
-# route those pixels to Black — so we use (0,155,0) which is in the correct
-# zone while still representing a dark green for accurate error diffusion.
+# These are also the correct targets for ESPHome's Waveshare ACeP threshold
+# decision tree (color_to_hex), which maps pixels to ink indices as follows:
+#   Black  : R≤127, G≤127, B≤127          → (0,0,0) ✓
+#   White  : R>127, G>170, B>127           → (255,255,255) ✓
+#   Green  : R≤127, G>127, B≤127           → (0,255,0) ✓
+#   Blue   : R≤127, B>127                  → (0,0,255) ✓
+#   Red    : R>127, G≤85                   → (255,0,0) ✓
+#   Yellow : R>127, G>170, B≤127           → (255,255,0) ✓
 E6_PALETTE_RGB: Final[list[tuple[int, int, int]]] = [
-    (25,  30,  33),   # 0 Black   — physical ink, correctly in Black zone
-    (232, 232, 232),  # 1 White   — physical ink, correctly in White zone
-    (0,   155, 0),    # 2 Green   — G=155>127, in Green zone; physical G=95 falls into Black
-    (33,  87,  186),  # 3 Blue    — physical ink, correctly in Blue zone
-    (178, 19,  24),   # 4 Red     — physical ink, correctly in Red zone
-    (239, 222, 68),   # 5 Yellow  — physical ink, correctly in Yellow zone
+    (0,   0,   0),    # 0 Black
+    (255, 255, 255),  # 1 White
+    (0,   255, 0),    # 2 Green
+    (0,   0,   255),  # 3 Blue
+    (255, 0,   0),    # 4 Red
+    (255, 255, 0),    # 5 Yellow
 ]
 
 PALETTE_RGB: Final[dict[str, list[tuple[int, int, int]]]] = {
@@ -197,46 +196,24 @@ def _preprocess(img: Image.Image) -> Image.Image:
     return img
 
 
-def _serpentine(img: Image.Image, palette: DitheringPalette) -> Image.Image:
-    """Bidirectional Floyd-Steinberg error diffusion (pure Python, Lab LUT).
+def _pil_floyd_steinberg(img: Image.Image, palette: DitheringPalette) -> Image.Image:
+    """Floyd-Steinberg dithering via PIL's built-in C quantize().
 
-    Alternates horizontal scan direction each row. Kernel (normalized / 16):
+    This is the same approach used by Waveshare's official Python drivers
+    (epd7in3f.py, epd5in65f.py) in their getbuffer() method:
 
-        even row →  .  P  7
-                    3  5  1
+        pal_image = Image.new("P", (1, 1))
+        pal_image.putpalette(palette_data)
+        result = image.quantize(palette=pal_image)
 
-        odd row →  7  P  .
-                   1  5  3
+    PIL's C implementation is significantly faster than a pure-Python loop.
     """
-    w, h = img.size
-    buf = list(img.tobytes())
-
-    def add_err(x: int, y: int, er: int, eg: int, eb: int) -> None:
-        if 0 <= x < w and 0 <= y < h:
-            o = (y * w + x) * 3
-            buf[o]     = max(0, min(255, buf[o]     + er))
-            buf[o + 1] = max(0, min(255, buf[o + 1] + eg))
-            buf[o + 2] = max(0, min(255, buf[o + 2] + eb))
-
-    out = bytearray(w * h * 3)
-
-    for y in range(h):
-        xs = range(w) if y % 2 == 0 else range(w - 1, -1, -1)
-        forward = 1 if y % 2 == 0 else -1
-
-        for x in xs:
-            o = (y * w + x) * 3
-            cr, cg, cb = buf[o], buf[o + 1], buf[o + 2]
-            pr, pg, pb = _nearest(cr, cg, cb, palette)
-            out[o], out[o + 1], out[o + 2] = pr, pg, pb
-
-            er, eg, eb = cr - pr, cg - pg, cb - pb
-            add_err(x + forward, y,      (er * 7) >> 4, (eg * 7) >> 4, (eb * 7) >> 4)
-            add_err(x - forward, y + 1,  (er * 3) >> 4, (eg * 3) >> 4, (eb * 3) >> 4)
-            add_err(x,           y + 1,  (er * 5) >> 4, (eg * 5) >> 4, (eb * 5) >> 4)
-            add_err(x + forward, y + 1,  (er * 1) >> 4, (eg * 1) >> 4, (eb * 1) >> 4)
-
-    return Image.frombytes("RGB", (w, h), bytes(out))
+    colors = PALETTE_RGB[palette]
+    pal_img = Image.new("P", (1, 1))
+    flat = [v for c in colors for v in c]
+    flat += [0] * (768 - len(flat))   # pad putpalette to 256 × 3 channels
+    pal_img.putpalette(flat)
+    return img.quantize(palette=pal_img, dither=Image.Dither.FLOYDSTEINBERG).convert("RGB")
 
 
 def _atkinson(img: Image.Image, palette: DitheringPalette) -> Image.Image:
@@ -322,7 +299,7 @@ def dither_to_pil(
     - **palette="none"** → no palette restriction; full color passthrough
       with preprocessing (contrast + saturation boost) but no colour quantization.
     - **all other combos**: preprocess, then dither to palette using Lab LUT.
-    - **"floyd-steinberg"** is an alias for the serpentine (bidirectional) algorithm.
+    - **"floyd-steinberg"** and **"floyd-steinberg-serpentine"** both use PIL's quantize().
     """
     # Algo "none": pure passthrough — no preprocessing, no dithering, no palette
     if algo == "none":
@@ -330,7 +307,7 @@ def dither_to_pil(
         src.load()
         return src.convert("RGB")
 
-    # Load and preprocess (needed for palette="none" passthrough and all dithering)
+    # Load and preprocess (contrast + saturation boost before quantisation)
     src = Image.open(io.BytesIO(image_bytes))
     src.load()
     img = _preprocess(src)
@@ -339,12 +316,9 @@ def dither_to_pil(
     if palette == "none":
         return img
 
-    # Dispatch to Lab LUT-based algorithm (all use _nearest)
     match algo:
-        case "floyd-steinberg":
-            return _serpentine(img, palette)
-        case "floyd-steinberg-serpentine":
-            return _serpentine(img, palette)
+        case "floyd-steinberg" | "floyd-steinberg-serpentine":
+            return _pil_floyd_steinberg(img, palette)
         case "atkinson":
             return _atkinson(img, palette)
         case "ordered":

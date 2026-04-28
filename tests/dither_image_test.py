@@ -69,9 +69,10 @@ def esphome_ink_index(r: int, g: int, b: int) -> int:
 
 
 # Expected ink index for each of our 6 palette entries.
-# Computed once at import time — the test itself just reads this dict.
+# Keyed by (R,G,B) tuple; computed from E6_PALETTE_RGB at import time so
+# tests automatically reflect palette changes without needing manual updates.
 PALETTE_INK: dict[tuple[int, int, int], int] = {
-    tuple(color): esphome_ink_index(*color)  # type: ignore[misc]
+    (color[0], color[1], color[2]): esphome_ink_index(*color)
     for color in E6_PALETTE_RGB
 }
 
@@ -116,31 +117,35 @@ def dithered_atkinson(source_jpeg: bytes) -> Image.Image:
 class TestPaletteEsphomeZones:
     """Verify each palette colour falls in the correct ESPHome ink zone.
 
+    Tests use E6_PALETTE_RGB directly (by index) so they remain correct
+    if the palette values change — no hardcoded RGB tuples here.
+
     This is the most critical test: a wrong zone means a whole colour
     renders as the wrong ink on the physical display.
     """
 
     def test_black_maps_to_black_zone(self):
-        assert PALETTE_INK[(25, 30, 33)] == INK_BLACK
+        assert esphome_ink_index(*E6_PALETTE_RGB[0]) == INK_BLACK
 
     def test_white_maps_to_white_zone(self):
-        assert PALETTE_INK[(232, 232, 232)] == INK_WHITE
+        assert esphome_ink_index(*E6_PALETTE_RGB[1]) == INK_WHITE
 
     def test_green_maps_to_green_zone(self):
-        assert PALETTE_INK[(0, 155, 0)] == INK_GREEN
+        assert esphome_ink_index(*E6_PALETTE_RGB[2]) == INK_GREEN
 
     def test_blue_maps_to_blue_zone(self):
-        assert PALETTE_INK[(33, 87, 186)] == INK_BLUE
+        assert esphome_ink_index(*E6_PALETTE_RGB[3]) == INK_BLUE
 
     def test_red_maps_to_red_zone(self):
-        assert PALETTE_INK[(178, 19, 24)] == INK_RED
+        assert esphome_ink_index(*E6_PALETTE_RGB[4]) == INK_RED
 
     def test_yellow_maps_to_yellow_zone(self):
-        assert PALETTE_INK[(239, 222, 68)] == INK_YELLOW
+        assert esphome_ink_index(*E6_PALETTE_RGB[5]) == INK_YELLOW
 
     def test_no_palette_colour_maps_to_orange(self):
         """Orange (index 6) is absent from the 6-colour palette."""
-        for color, ink in PALETTE_INK.items():
+        for color in E6_PALETTE_RGB:
+            ink = esphome_ink_index(*color)
             assert ink != INK_ORANGE, (
                 f"Palette colour {color} maps to Orange zone — "
                 "it would render as the wrong ink on a 6-colour display"
@@ -148,7 +153,7 @@ class TestPaletteEsphomeZones:
 
     def test_all_six_zones_covered(self):
         """Every ink index 0-5 must have exactly one palette entry."""
-        used_zones = set(PALETTE_INK.values())
+        used_zones = {esphome_ink_index(*c) for c in E6_PALETTE_RGB}
         assert used_zones == {INK_BLACK, INK_WHITE, INK_GREEN, INK_BLUE, INK_RED, INK_YELLOW}
 
 
