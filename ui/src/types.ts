@@ -19,9 +19,9 @@ export const DITHERING_ALGOS: DitheringAlgo[] = [
   'ordered',
 ];
 
-export type DitheringPalette = 'none' | 'bw' | 'bwr' | 'bwy' | '4color' | 'e6' | 'e6bright' | 'e6natural';
+export type DitheringPalette = 'none' | 'bw' | 'bwr' | 'bwy' | '4color' | 'e6';
 
-export const DITHERING_PALETTES: DitheringPalette[] = ['none', 'bw', 'bwr', 'bwy', '4color', 'e6', 'e6bright', 'e6natural'];
+export const DITHERING_PALETTES: DitheringPalette[] = ['none', 'bw', 'bwr', 'bwy', '4color', 'e6'];
 
 export const PALETTE_LABELS: Record<DitheringPalette, string> = {
   none:      'Full Color (no dithering)',
@@ -30,8 +30,6 @@ export const PALETTE_LABELS: Record<DitheringPalette, string> = {
   bwy:       'Black, White & Yellow',
   '4color':  '4-Color',
   e6:        'E-Paper 7-Color (ACeP)',
-  e6bright:  'E-Paper 7-Color Bright (+25%)',
-  e6natural: 'E-Paper 7-Color Natural',
 };
 
 export interface Client {
