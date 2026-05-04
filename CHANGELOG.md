@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.21.0 (2026-05-04)
+
+### Features
+
+- **ui**: Add e6natural palette to frontend types and labels
+  ([`003e1fe`](https://github.com/vantreeseba/sendspin-image-server/commit/003e1fefb47621b004260590436a938ad62bbcd1))
+
+
 ## v1.20.0 (2026-05-04)
 
 
