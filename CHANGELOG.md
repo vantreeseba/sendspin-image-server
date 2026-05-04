@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.21.1 (2026-05-04)
+
+### Bug Fixes
+
+- **dither**: Lighten e6natural palette and add yellow to orange
+  ([`84bb785`](https://github.com/vantreeseba/sendspin-image-server/commit/84bb7853e1a708d0700976a95e793a97d60f9690))
+
+
 ## v1.21.0 (2026-05-04)
 
 ### Features
