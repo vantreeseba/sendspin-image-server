@@ -69,12 +69,13 @@ def _load_act(path: pathlib.Path) -> list[tuple[int, int, int]]:
 # Map ACT filename stem → (palette key, human label)
 # Keys become the palette identifiers used throughout the API and UI.
 _ACT_MAP: Final[dict[str, tuple[str, str]]] = {
-    "Black-White":        ("bw",       "Black & White"),
-    "Black-White-Red":    ("bwr",      "Black, White & Red"),
-    "Black-White-Yellow": ("bwy",      "Black, White & Yellow"),
-    "4-color":            ("4color",   "4-Color"),
-    "N-color":            ("e6",       "E-Paper 7-Color (ACeP)"),
-    "N-color-bright":     ("e6bright", "E-Paper 7-Color Bright (+25%)"),
+    "Black-White":        ("bw",        "Black & White"),
+    "Black-White-Red":    ("bwr",       "Black, White & Red"),
+    "Black-White-Yellow": ("bwy",       "Black, White & Yellow"),
+    "4-color":            ("4color",    "4-Color"),
+    "N-color":            ("e6",        "E-Paper 7-Color (ACeP)"),
+    "N-color-bright":     ("e6bright",  "E-Paper 7-Color Bright (+25%)"),
+    "N-color-natural":    ("e6natural", "E-Paper 7-Color Natural"),
 }
 
 # Build palette registry from .act files at import time.
@@ -96,7 +97,7 @@ for _act_path in sorted(_TABLES_DIR.glob("*.act")):
         logger.warning("Failed to load palette %r from %s: %s", _key, _act_path, _e)
 
 # "none" is always available — no quantisation, full colour passthrough.
-DitheringPalette = Literal["none", "bw", "bwr", "bwy", "4color", "e6"]
+DitheringPalette = Literal["none", "bw", "bwr", "bwy", "4color", "e6", "e6bright", "e6natural"]
 DITHER_PALETTES: Final[tuple[str, ...]] = ("none",) + tuple(_LOADED_PALETTES)
 
 PALETTE_LABELS: Final[dict[str, str]] = {
