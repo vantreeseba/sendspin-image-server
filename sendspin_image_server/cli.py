@@ -10,8 +10,9 @@ import logging
 import os
 import pathlib
 import signal
+import tempfile
 import uuid
-from typing import Any  # noqa: F401
+from typing import Any
 
 from sendspin_image_server.db import Database
 from sendspin_image_server.dither import (
@@ -25,6 +26,7 @@ from sendspin_image_server.dither import (
 from sendspin_image_server.endpoints import (
     CalibrationEndpoint,
     HomeAssistantEndpoint,
+    ImageEndpoint,
     ImmichEndpoint,
     LocalFolderEndpoint,
 )
@@ -36,6 +38,11 @@ from sendspin_image_server.stream import _resize_for_channel
 _VALID_DITHER_ALGOS = set(DITHER_ALGOS)
 _VALID_DITHER_PALETTES = set(DITHER_PALETTES)
 
+
+def _invalid_choice(field: str, value: object, valid: set[str]) -> str:
+    """Render a 400-response message listing the accepted values for `field`."""
+    return f"Invalid {field} {value!r}. Choose from: {', '.join(sorted(valid))}"
+
 logger = logging.getLogger(__name__)
 
 # Built-in local folder endpoint — always present, cannot be deleted via REST.
@@ -43,7 +50,10 @@ _BUILTIN_LOCAL_ENDPOINT_ID = "builtin-local"
 _BUILTIN_LOCAL_PATH = pathlib.Path("/app/images")
 
 
-async def run(
+# TODO: run() defines every aiohttp handler as a closure, which is why it is
+# 375 statements long. Splitting the REST layer into its own module would let
+# these suppressions go away.
+async def run(  # noqa: C901, PLR0915
     host: str,
     port: int,
     name: str,
@@ -70,7 +80,7 @@ async def run(
         # Only cancel the outbound connection if the client is not locked.
         # Locked clients keep their outbound task alive so they reconnect
         # as soon as the device is reachable again.
-        client_id = server._url_to_client_id.get(url)
+        client_id = server.client_id_for_url(url)
         if client_id and registry_ref[0] and registry_ref[0].is_client_locked(client_id):
             logger.info("Locked client %s lost mDNS — keeping outbound task alive", client_id)
             return
@@ -152,7 +162,7 @@ async def run(
         logger.info("Pushed image (%d bytes) to artwork clients on channel %d", len(data), channel)
         return web.Response(status=200, text="OK")
 
-    async def handle_debug_current_image(request: web.Request) -> web.Response:
+    async def handle_debug_current_image(_request: web.Request) -> web.Response:
         """GET /debug/current-image — return last-broadcast image as PNG."""
         raw = server.last_image
         if raw is None:
@@ -176,13 +186,15 @@ async def run(
             import io as _io
 
             pil_img = dither_to_pil(data, algo=dither_algo, palette=dither_palette)
-            if palette_set is not None:
-                bad = sum(1 for px in pil_img.getdata() if px not in palette_set)
-            else:
-                bad = 0
+            pixels = list(pil_img.getdata())
+            bad = (
+                sum(1 for px in pixels if px not in palette_set)
+                if palette_set is not None
+                else 0
+            )
             png_buf = _io.BytesIO()
             pil_img.save(png_buf, format="PNG")
-            return png_buf.getvalue(), bad, len(list(pil_img.getdata()))
+            return png_buf.getvalue(), bad, len(pixels)
 
         applying_dither = dither_algo != "none" and dither_palette != "none"
         if applying_dither:
@@ -207,7 +219,8 @@ async def run(
             pil_img.save(png_buf, format="PNG")
             png_bytes = png_buf.getvalue()
 
-        out_path = pathlib.Path("/tmp/debug_current.png")
+        debug_dir = data_dir if data_dir is not None else pathlib.Path(tempfile.gettempdir())
+        out_path = debug_dir / "debug_current.png"
         out_path.write_bytes(png_bytes)
         logger.info(
             "Debug image saved to %s (%d bytes, %dx%d)", out_path, len(png_bytes), width, height
@@ -218,14 +231,14 @@ async def run(
     # REST API
     # ------------------------------------------------------------------
 
-    async def api_get_clients(request: web.Request) -> web.Response:
+    async def api_get_clients(_request: web.Request) -> web.Response:
         """GET /api/clients."""
         return web.Response(
             content_type="application/json",
             text=json.dumps(registry.client_info()),
         )
 
-    async def api_get_endpoints(request: web.Request) -> web.Response:
+    async def api_get_endpoints(_request: web.Request) -> web.Response:
         """GET /api/endpoints."""
         data = []
         for ep in registry.list_endpoints():
@@ -239,7 +252,7 @@ async def run(
         """POST /api/endpoints  body: {kind, name, ...}."""
         try:
             body = await request.json()
-        except Exception:
+        except ValueError:
             return web.Response(status=400, text="Invalid JSON")
 
         kind = body.get("kind")
@@ -252,9 +265,9 @@ async def run(
             if not path_str:
                 return web.Response(status=400, text="'path' is required for kind=local")
             path = pathlib.Path(path_str)
-            if not path.is_dir():
+            if not await asyncio.to_thread(path.is_dir):
                 return web.Response(status=400, text=f"Directory not found: {path_str}")
-            ep = LocalFolderEndpoint(name=ep_name, path=path)
+            ep: ImageEndpoint = LocalFolderEndpoint(name=ep_name, path=path)
         elif kind == "immich":
             base_url = body.get("base_url", "").strip()
             album_id = body.get("album_id", "").strip()
@@ -284,7 +297,10 @@ async def run(
         else:
             return web.Response(
                 status=400,
-                text=f"Unknown kind: {kind!r}. Must be 'local', 'immich', 'homeassistant', or 'calibration'",
+                text=(
+                    f"Unknown kind: {kind!r}. Must be 'local', 'immich', "
+                    "'homeassistant', or 'calibration'"
+                ),
             )
 
         await registry.add_endpoint(ep)
@@ -303,18 +319,16 @@ async def run(
             return web.Response(status=404, text=f"Endpoint {endpoint_id!r} not found")
         return web.Response(status=204)
 
-    async def api_get_device_presets(request: web.Request) -> web.Response:
+    async def api_get_device_presets(_request: web.Request) -> web.Response:
         """GET /api/device-presets."""
-        data = []
-        for preset in registry.list_device_presets():
-            data.append(preset.to_dict())
+        data = [preset.to_dict() for preset in registry.list_device_presets()]
         return web.Response(content_type="application/json", text=json.dumps(data))
 
     async def api_add_device_preset(request: web.Request) -> web.Response:
         """POST /api/device-presets  body: {name, dither_algo, dither_palette, interval}."""
         try:
             body = await request.json()
-        except Exception:
+        except ValueError:
             return web.Response(status=400, text="Invalid JSON")
 
         name = body.get("name", "").strip()
@@ -325,17 +339,17 @@ async def run(
         if dither_algo not in _VALID_DITHER_ALGOS:
             return web.Response(
                 status=400,
-                text=f"Invalid dither_algo {dither_algo!r}. Choose from: {', '.join(sorted(_VALID_DITHER_ALGOS))}",
+                text=_invalid_choice("dither_algo", dither_algo, _VALID_DITHER_ALGOS),
             )
         dither_palette = body.get("dither_palette", "e6").strip()
         if dither_palette not in _VALID_DITHER_PALETTES:
             return web.Response(
                 status=400,
-                text=f"Invalid dither_palette {dither_palette!r}. Choose from: {', '.join(sorted(_VALID_DITHER_PALETTES))}",
+                text=_invalid_choice("dither_palette", dither_palette, _VALID_DITHER_PALETTES),
             )
         raw_interval = body.get("interval")
         if raw_interval is None:
-            interval = 0
+            interval = 0.0
         else:
             try:
                 interval = float(raw_interval)
@@ -373,7 +387,7 @@ async def run(
 
         try:
             body = await request.json()
-        except Exception:
+        except ValueError:
             return web.Response(status=400, text="Invalid JSON")
 
         kwargs: dict[str, Any] = {}
@@ -387,7 +401,7 @@ async def run(
             if algo not in _VALID_DITHER_ALGOS:
                 return web.Response(
                     status=400,
-                    text=f"Invalid dither_algo {algo!r}. Choose from: {', '.join(sorted(_VALID_DITHER_ALGOS))}",
+                    text=_invalid_choice("dither_algo", algo, _VALID_DITHER_ALGOS),
                 )
             kwargs["dither_algo"] = algo
         if "dither_palette" in body:
@@ -395,7 +409,7 @@ async def run(
             if palette not in _VALID_DITHER_PALETTES:
                 return web.Response(
                     status=400,
-                    text=f"Invalid dither_palette {palette!r}. Choose from: {', '.join(sorted(_VALID_DITHER_PALETTES))}",
+                    text=_invalid_choice("dither_palette", palette, _VALID_DITHER_PALETTES),
                 )
             kwargs["dither_palette"] = palette
         if "interval" in body:
@@ -420,7 +434,7 @@ async def run(
         client_id = request.match_info["id"]
         try:
             body = await request.json()
-        except Exception:
+        except ValueError:
             return web.Response(status=400, text="Invalid JSON")
         endpoint_id = body.get("endpoint_id", "").strip()
         if not endpoint_id:
@@ -440,7 +454,7 @@ async def run(
         client_id = request.match_info["id"]
         try:
             body = await request.json()
-        except Exception:
+        except ValueError:
             return web.Response(status=400, text="Invalid JSON")
         preset_id = body.get("preset_id")
         if preset_id is not None:
@@ -458,15 +472,15 @@ async def run(
         client_id = request.match_info["id"]
         try:
             body = await request.json()
-        except Exception:
+        except ValueError:
             return web.Response(status=400, text="Invalid JSON")
         algo = body.get("dither_algo", "").strip()
         if algo not in _VALID_DITHER_ALGOS:
             return web.Response(
                 status=400,
-                text=f"Invalid dither_algo {algo!r}. Choose from: {', '.join(sorted(_VALID_DITHER_ALGOS))}",
+                text=_invalid_choice("dither_algo", algo, _VALID_DITHER_ALGOS),
             )
-        registry.set_client_dither(client_id, algo)  # type: ignore[arg-type]
+        registry.set_client_dither(client_id, algo)
         return web.Response(status=204)
 
     async def api_set_client_palette(request: web.Request) -> web.Response:
@@ -474,15 +488,15 @@ async def run(
         client_id = request.match_info["id"]
         try:
             body = await request.json()
-        except Exception:
+        except ValueError:
             return web.Response(status=400, text="Invalid JSON")
         palette = body.get("dither_palette", "").strip()
         if palette not in _VALID_DITHER_PALETTES:
             return web.Response(
                 status=400,
-                text=f"Invalid dither_palette {palette!r}. Choose from: {', '.join(sorted(_VALID_DITHER_PALETTES))}",
+                text=_invalid_choice("dither_palette", palette, _VALID_DITHER_PALETTES),
             )
-        registry.set_client_palette(client_id, palette)  # type: ignore[arg-type]
+        registry.set_client_palette(client_id, palette)
         return web.Response(status=204)
 
     async def api_set_client_interval(request: web.Request) -> web.Response:
@@ -490,7 +504,7 @@ async def run(
         client_id = request.match_info["id"]
         try:
             body = await request.json()
-        except Exception:
+        except ValueError:
             return web.Response(status=400, text="Invalid JSON")
         raw = body.get("interval")
         if raw is None:
@@ -507,7 +521,7 @@ async def run(
     async def api_get_client_debug_image(request: web.Request) -> web.Response:
         """GET /api/clients/{id}/debug-image — return the last image pushed to this client."""
         client_id = request.match_info["id"]
-        image_bytes: bytes | None = server._last_image.get(client_id)
+        image_bytes: bytes | None = server.last_image_for(client_id)
 
         if not image_bytes:
             return web.Response(
@@ -543,7 +557,7 @@ async def run(
 
         try:
             data = await endpoint.fetch_next()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - endpoint plugins may raise anything
             return web.Response(status=500, text=f"Endpoint fetch failed: {exc}")
 
         if not data:
@@ -563,8 +577,8 @@ async def run(
                 dither_palette=client_palette if force_dither else "e6",
             )
             if sent is not None:
-                server._last_image[client_id] = sent
-        except Exception as exc:
+                server.record_last_image(client_id, sent)
+        except Exception as exc:  # noqa: BLE001 - one bad push must not 500 the server
             return web.Response(status=500, text=f"Push failed: {exc}")
 
         return web.Response(status=204)
@@ -589,12 +603,12 @@ async def run(
         client_id = request.match_info["id"]
         try:
             body = await request.json()
-        except Exception:
+        except ValueError:
             return web.Response(status=400, text="Invalid JSON")
         locked = body.get("locked")
         if not isinstance(locked, bool):
             return web.Response(status=400, text="'locked' must be a boolean")
-        registry.set_client_locked(client_id, locked)
+        registry.set_client_locked(client_id, locked=locked)
         if locked:
             # If we know the URL and the client isn't already connected, auto-connect now.
             clients = registry.client_info()
@@ -624,7 +638,7 @@ async def run(
     _UI_DIST = pathlib.Path(__file__).parent / "ui_dist"
     _UI_INDEX = _UI_DIST / "index.html"
 
-    async def handle_ui(request: web.Request) -> web.Response:
+    async def handle_ui(_request: web.Request) -> web.Response:
         """GET / — serve the React SPA index.html."""
         if not _UI_INDEX.exists():
             return web.Response(status=503, text="UI not built — ui_dist/index.html missing")
@@ -746,7 +760,10 @@ def main() -> None:
         "--dither-palette",
         default="e6",
         choices=list(DITHER_PALETTES),
-        help="Default dithering palette for clients without an explicit override (none=full color, bw=black&white, e6=6-color e-Paper)",
+        help=(
+            "Default dithering palette for clients without an explicit override "
+            "(none=full color, bw=black&white, e6=6-color e-Paper)"
+        ),
     )
     _data_dir_default = os.environ.get("DATA_DIR")
     parser.add_argument(

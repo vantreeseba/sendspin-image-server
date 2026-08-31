@@ -37,6 +37,7 @@ from __future__ import annotations
 import json
 import logging
 import pathlib
+import sqlite3
 from typing import Any
 
 import aiosqlite
@@ -108,8 +109,9 @@ class Database:
             try:
                 await self._db.execute(migration)
                 await self._db.commit()
-            except Exception:
-                pass  # Column already exists in existing DB — that's fine
+            except sqlite3.OperationalError as exc:
+                # Almost always "duplicate column name" — the migration already ran.
+                logger.debug("Migration skipped (%s): %s", exc, migration)
         logger.info("Database opened: %s", self._path)
 
     async def close(self) -> None:
@@ -129,7 +131,8 @@ class Database:
             """
             INSERT INTO endpoints (id, kind, name, config_json)
             VALUES (?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET kind=excluded.kind, name=excluded.name, config_json=excluded.config_json
+            ON CONFLICT(id) DO UPDATE SET
+                kind=excluded.kind, name=excluded.name, config_json=excluded.config_json
             """,
             (endpoint_id, kind, name, json.dumps(config)),
         )
@@ -149,7 +152,7 @@ class Database:
         for row in rows:
             try:
                 config = json.loads(row["config_json"])
-            except Exception:
+            except (ValueError, TypeError):
                 config = {}
             result.append(
                 {
@@ -177,7 +180,8 @@ class Database:
         assert self._db is not None
         await self._db.execute(
             """
-            INSERT INTO assignments (client_id, endpoint_id, preset_id, dither_algo, dither_palette, interval)
+            INSERT INTO assignments
+                (client_id, endpoint_id, preset_id, dither_algo, dither_palette, interval)
             VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(client_id) DO UPDATE SET
                 endpoint_id=excluded.endpoint_id,
@@ -196,10 +200,14 @@ class Database:
         await self._db.commit()
 
     async def load_assignments(self) -> dict[str, dict[str, Any]]:
-        """Return {client_id: {endpoint_id, preset_id, dither_algo, dither_palette, interval}} for all persisted assignments."""
+        """Return the persisted assignment row for every client.
+
+        Shape: {client_id: {endpoint_id, preset_id, dither_algo, dither_palette, interval}}.
+        """
         assert self._db is not None
         async with self._db.execute(
-            "SELECT client_id, endpoint_id, preset_id, dither_algo, dither_palette, interval FROM assignments"
+            "SELECT client_id, endpoint_id, preset_id, dither_algo, dither_palette, interval "
+            "FROM assignments"
         ) as cur:
             rows = await cur.fetchall()
         return {
@@ -267,7 +275,8 @@ class Database:
         """Return a single device preset by id, or None if not found."""
         assert self._db is not None
         async with self._db.execute(
-            "SELECT id, name, dither_algo, dither_palette, interval FROM device_presets WHERE id = ?",
+            "SELECT id, name, dither_algo, dither_palette, interval "
+            "FROM device_presets WHERE id = ?",
             (preset_id,),
         ) as cur:
             row = await cur.fetchone()
@@ -286,7 +295,8 @@ class Database:
         assert self._db is not None
         await self._db.execute(
             """
-            INSERT INTO assignments (client_id, endpoint_id, preset_id, dither_algo, dither_palette, interval)
+            INSERT INTO assignments
+                (client_id, endpoint_id, preset_id, dither_algo, dither_palette, interval)
             VALUES (?, NULL, ?, 'none', 'e6', 0)
             ON CONFLICT(client_id) DO UPDATE SET preset_id=excluded.preset_id
             """,
@@ -313,7 +323,7 @@ class Database:
         )
         await self._db.commit()
 
-    async def load_client_urls(self) -> dict[str, dict[str, str | None | bool]]:
+    async def load_client_urls(self) -> dict[str, dict[str, str | bool | None]]:
         """Return {client_id: {name, last_known_url, locked}} for all persisted clients."""
         assert self._db is not None
         async with self._db.execute(
@@ -329,7 +339,7 @@ class Database:
             for row in rows
         }
 
-    async def set_client_locked(self, client_id: str, locked: bool) -> None:
+    async def set_client_locked(self, client_id: str, *, locked: bool) -> None:
         """Set the locked flag for a client (upsert — creates the row if absent)."""
         assert self._db is not None
         await self._db.execute(

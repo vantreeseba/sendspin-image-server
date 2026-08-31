@@ -50,13 +50,13 @@ class MDNSAdvertiser:
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
                 s.connect(("8.8.8.8", 80))
                 local_ip = s.getsockname()[0]
-        except Exception:
+        except OSError:
             local_ip = "127.0.0.1"
 
         self._zeroconf = AsyncZeroconf()
 
         base_name = self._name
-        self._info: ServiceInfo | None = None
+        self._info = None
         last_exception: Exception | None = None
 
         for attempt in range(1, 11):
@@ -94,7 +94,8 @@ class MDNSAdvertiser:
             await self._zeroconf.async_close()
             self._zeroconf = None
             logger.warning(
-                "mDNS: could not advertise service after 10 attempts (last: %s) — continuing without mDNS",
+                "mDNS: could not advertise service after 10 attempts (last: %s) — "
+                "continuing without mDNS",
                 last_exception,
             )
 
@@ -201,7 +202,7 @@ class MDNSDiscovery:
             return  # already connected
 
         self._known[name] = url
-        display_name = name.split("._")[0]
+        display_name = name.split("._", 1)[0]
         logger.info("mDNS: discovered Sendspin client '%s' at %s", name, url)
         self._on_client_added(url, display_name)
 

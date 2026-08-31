@@ -19,12 +19,11 @@ Concrete implementations
 from __future__ import annotations
 
 import io as _io
-import json
 import logging
 import pathlib
 import uuid
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, cast
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
@@ -137,10 +136,12 @@ class ImmichEndpoint(ImageEndpoint):
     async def _refresh_assets(self) -> None:
         import aiohttp
         url = f"{self.base_url}/api/albums/{self.album_id}"
-        async with aiohttp.ClientSession(headers=self._headers()) as session:
-            async with session.get(url) as resp:
-                resp.raise_for_status()
-                album = await resp.json()
+        async with (
+            aiohttp.ClientSession(headers=self._headers()) as session,
+            session.get(url) as resp,
+        ):
+            resp.raise_for_status()
+            album = await resp.json()
         all_assets: list[dict[str, Any]] = album.get("assets", [])
         self._assets = [a for a in all_assets if a.get("type") == "IMAGE"]
 
@@ -155,15 +156,14 @@ class ImmichEndpoint(ImageEndpoint):
         asset = self._assets[self._index]
         asset_id = asset["id"]
         url = f"{self.base_url}/api/assets/{asset_id}/original"
-        async with aiohttp.ClientSession(headers=self._headers()) as session:
-            async with session.get(
-                url,
-                headers={**self._headers(), "Accept": "application/octet-stream"},
-            ) as resp:
-                resp.raise_for_status()
-                data = await resp.read()
-        img = Image.open(_io.BytesIO(data))
-        img = ImageOps.exif_transpose(img)
+        async with aiohttp.ClientSession(headers=self._headers()) as session, session.get(
+            url,
+            headers={**self._headers(), "Accept": "application/octet-stream"},
+        ) as resp:
+            resp.raise_for_status()
+            data = await resp.read()
+        img: Image.Image = Image.open(_io.BytesIO(data))
+        img = ImageOps.exif_transpose(img) or img
         img = img.convert("RGB")
         buf = _io.BytesIO()
         img.save(buf, format="JPEG", quality=95, subsampling=0)
@@ -185,8 +185,9 @@ class ImmichEndpoint(ImageEndpoint):
 # ---------------------------------------------------------------------------
 
 class HomeAssistantEndpoint(ImageEndpoint):
-    """Browses the Home Assistant Media Browser at a given path and downloads
-    images in order via the REST API.
+    """Browse a Home Assistant Media Browser path and download images in order.
+
+    Images are fetched in order via the REST API.
 
     Authentication uses a Long-Lived Access Token (LLAT).
 
@@ -242,30 +243,29 @@ class HomeAssistantEndpoint(ImageEndpoint):
         ws_url = f"{ws_url}/api/websocket"
         msg_id = 1
 
-        async with aiohttp.ClientSession() as session:
-            async with session.ws_connect(ws_url) as ws:
-                # auth_required
-                auth_req = await ws.receive_json()
-                if auth_req.get("type") != "auth_required":
-                    raise RuntimeError(f"Expected auth_required, got: {auth_req}")
+        async with aiohttp.ClientSession() as session, session.ws_connect(ws_url) as ws:
+            # auth_required
+            auth_req = await ws.receive_json()
+            if auth_req.get("type") != "auth_required":
+                raise RuntimeError(f"Expected auth_required, got: {auth_req}")
 
-                # send auth
-                await ws.send_json({"type": "auth", "access_token": self.token})
-                auth_resp = await ws.receive_json()
-                if auth_resp.get("type") != "auth_ok":
-                    raise RuntimeError(f"HA auth failed: {auth_resp.get('message', auth_resp)}")
+            # send auth
+            await ws.send_json({"type": "auth", "access_token": self.token})
+            auth_resp = await ws.receive_json()
+            if auth_resp.get("type") != "auth_ok":
+                raise RuntimeError(f"HA auth failed: {auth_resp.get('message', auth_resp)}")
 
-                # browse_media
-                await ws.send_json({
-                    "id": msg_id,
-                    "type": "media_player/browse_media",
-                    "media_content_id": media_content_id,
-                    "media_content_type": media_content_type,
-                })
-                result = await ws.receive_json()
-                if not result.get("success"):
-                    raise RuntimeError(f"HA browse failed: {result}")
-                return result["result"]  # type: ignore[return-value]
+            # browse_media
+            await ws.send_json({
+                "id": msg_id,
+                "type": "media_player/browse_media",
+                "media_content_id": media_content_id,
+                "media_content_type": media_content_type,
+            })
+            result = await ws.receive_json()
+            if not result.get("success"):
+                raise RuntimeError(f"HA browse failed: {result}")
+            return cast("dict[str, Any]", result["result"])
 
     async def _ws_resolve(self, media_content_id: str) -> str:
         """Resolve a media-source URI to a playable URL via WebSocket."""
@@ -274,23 +274,22 @@ class HomeAssistantEndpoint(ImageEndpoint):
         ws_url = self.base_url.replace("https://", "wss://").replace("http://", "ws://")
         ws_url = f"{ws_url}/api/websocket"
 
-        async with aiohttp.ClientSession() as session:
-            async with session.ws_connect(ws_url) as ws:
-                await ws.receive_json()  # auth_required
-                await ws.send_json({"type": "auth", "access_token": self.token})
-                auth_resp = await ws.receive_json()
-                if auth_resp.get("type") != "auth_ok":
-                    raise RuntimeError(f"HA auth failed: {auth_resp.get('message', auth_resp)}")
+        async with aiohttp.ClientSession() as session, session.ws_connect(ws_url) as ws:
+            await ws.receive_json()  # auth_required
+            await ws.send_json({"type": "auth", "access_token": self.token})
+            auth_resp = await ws.receive_json()
+            if auth_resp.get("type") != "auth_ok":
+                raise RuntimeError(f"HA auth failed: {auth_resp.get('message', auth_resp)}")
 
-                await ws.send_json({
-                    "id": 1,
-                    "type": "media_source/resolve_media",
-                    "media_content_id": media_content_id,
-                })
-                result = await ws.receive_json()
-                if not result.get("success"):
-                    raise RuntimeError(f"HA resolve failed: {result}")
-                return result["result"]["url"]  # type: ignore[return-value]
+            await ws.send_json({
+                "id": 1,
+                "type": "media_source/resolve_media",
+                "media_content_id": media_content_id,
+            })
+            result = await ws.receive_json()
+            if not result.get("success"):
+                raise RuntimeError(f"HA resolve failed: {result}")
+            return str(result["result"]["url"])
 
     # ------------------------------------------------------------------
     # Image collection
@@ -324,7 +323,9 @@ class HomeAssistantEndpoint(ImageEndpoint):
         return images
 
     async def _refresh(self) -> None:
-        logger.info("HA endpoint %r: refreshing media tree from %r", self.name, self.media_content_id)
+        logger.info(
+            "HA endpoint %r: refreshing media tree from %r", self.name, self.media_content_id
+        )
         root = await self._ws_browse(self.media_content_id)
         self._items = await self._collect_images(root)
         logger.info("HA endpoint %r: found %d image(s)", self.name, len(self._items))
@@ -353,17 +354,16 @@ class HomeAssistantEndpoint(ImageEndpoint):
         if cid.startswith("media-source://"):
             resolved = await self._ws_resolve(cid)
             # Relative URLs need the base_url prepended
-            if resolved.startswith("/"):
-                url = f"{self.base_url}{resolved}"
-            else:
-                url = resolved
+            url = f"{self.base_url}{resolved}" if resolved.startswith("/") else resolved
         else:
             url = cid  # already a URL
 
-        async with aiohttp.ClientSession(headers=self._headers()) as session:
-            async with session.get(url) as resp:
-                resp.raise_for_status()
-                return await resp.read()
+        async with (
+            aiohttp.ClientSession(headers=self._headers()) as session,
+            session.get(url) as resp,
+        ):
+            resp.raise_for_status()
+            return await resp.read()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -382,7 +382,7 @@ class HomeAssistantEndpoint(ImageEndpoint):
 # Standard ACeP hardware expects: 0=Black,1=White,2=Green,3=Blue,4=Red,5=Yellow,6=Orange
 # Whether those match depends on the init_sequence programmed into the display.
 _CALIBRATION_ENTRIES: list[tuple[str, tuple[int, int, int], int, str]] = [
-    # (label, rgb, esphome_nibble, std_acep_at_that_nibble)
+    # (label, rgb, esphome_nibble, std_acep_at_that_nibble)  # noqa: ERA001
     ("BLACK",  (0,   0,   0),   0, "Black"),
     ("WHITE",  (255, 255, 255), 1, "White"),
     ("GREEN",  (0,   255, 0),   6, "Orange?"),

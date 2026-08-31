@@ -91,12 +91,12 @@ for _act_path in sorted(_TABLES_DIR.glob("*.act")):
     try:
         _LOADED_PALETTES[_key] = _load_act(_act_path)
         _LOADED_LABELS[_key]   = _label
-    except Exception as _e:
+    except Exception as _e:  # noqa: BLE001 - a bad palette file must not break import
         logger.warning("Failed to load palette %r from %s: %s", _key, _act_path, _e)
 
 # "none" is always available — no quantisation, full colour passthrough.
 DitheringPalette = Literal["none", "bw", "bwr", "bwy", "4color", "e6"]
-DITHER_PALETTES: Final[tuple[str, ...]] = ("none",) + tuple(_LOADED_PALETTES)
+DITHER_PALETTES: Final[tuple[str, ...]] = ("none", *_LOADED_PALETTES)
 
 PALETTE_LABELS: Final[dict[str, str]] = {
     "none": "Full Color (no dithering)",
@@ -110,13 +110,15 @@ E6_PALETTE_RGB: Final[list[tuple[int, int, int]]] = _LOADED_PALETTES["e6"]
 PALETTE_RGB: Final[dict[str, list[tuple[int, int, int]]]] = dict(_LOADED_PALETTES)
 
 PALETTE_SETS: Final[dict[str, frozenset[tuple[int, int, int]]]] = {
-    key: frozenset(map(tuple, rgb)) for key, rgb in PALETTE_RGB.items()
+    key: frozenset(rgb) for key, rgb in PALETTE_RGB.items()
 }
 
 E6_PALETTE_SET: Final[frozenset[tuple[int, int, int]]] = PALETTE_SETS["e6"]
 BW_PALETTE_SET: Final[frozenset[tuple[int, int, int]]] = PALETTE_SETS["bw"]
 
-DitheringAlgo = Literal["none", "floyd-steinberg", "floyd-steinberg-serpentine", "atkinson", "ordered"]
+DitheringAlgo = Literal[
+    "none", "floyd-steinberg", "floyd-steinberg-serpentine", "atkinson", "ordered"
+]
 DITHER_ALGOS: Final[tuple[str, ...]] = (
     "none",
     "floyd-steinberg",
@@ -238,13 +240,15 @@ def _preprocess(img: Image.Image) -> Image.Image:
     """Convert to RGB and apply a gentle contrast + saturation boost."""
     img = img.convert("RGB")
     img = ImageEnhance.Contrast(img).enhance(1.2)
-    img = ImageEnhance.Color(img).enhance(1.3)
-    return img
+    return ImageEnhance.Color(img).enhance(1.3)
 
 
 def _floyd_steinberg(img: Image.Image, palette: DitheringPalette) -> Image.Image:
     """Floyd-Steinberg via Pillow's C quantize engine."""
-    return img.quantize(palette=_PALETTE_IMAGES[palette], dither=Image.Dither.FLOYDSTEINBERG).convert("RGB")
+    quantized = img.quantize(
+        palette=_PALETTE_IMAGES[palette], dither=Image.Dither.FLOYDSTEINBERG
+    )
+    return quantized.convert("RGB")
 
 
 def _serpentine_floyd_steinberg(img: Image.Image, palette: DitheringPalette) -> Image.Image:
