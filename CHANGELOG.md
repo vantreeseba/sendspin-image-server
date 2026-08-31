@@ -2,6 +2,41 @@
 
 <!-- version list -->
 
+## v1.22.1 (2026-08-31)
+
+### Bug Fixes
+
+- **registry**: Track background writes and validate preset interval
+  ([`d6e31ca`](https://github.com/vantreeseba/sendspin-image-server/commit/d6e31cad19c87464a41e1f017519005d2ff612c4))
+
+- **server**: Correct websocket connection types and handler arity
+  ([`5df1260`](https://github.com/vantreeseba/sendspin-image-server/commit/5df1260894c65d42cdda8d293174c9cf4797ecc4))
+
+- **ui**: Reset debug preview by remounting on client change
+  ([`b66083b`](https://github.com/vantreeseba/sendspin-image-server/commit/b66083b7d77741110591a8a14918b304ab7b0b1e))
+
+### Documentation
+
+- Rewrite ui readme and record completed todo
+  ([`b086455`](https://github.com/vantreeseba/sendspin-image-server/commit/b0864555e3b850de6d2e3e4c764fe850e309dbc8))
+
+### Refactoring
+
+- Resolve remaining ruff and mypy findings
+  ([`a3c94af`](https://github.com/vantreeseba/sendspin-image-server/commit/a3c94afe3cbf275729ed53ef413308378fffa565))
+
+- **docker**: Install python deps from pyproject
+  ([`20538cf`](https://github.com/vantreeseba/sendspin-image-server/commit/20538cf989a291bfcc33d1bd92b8d12b2a4dd01c))
+
+- **ui**: Replace eslint with biome and upgrade to typescript 7
+  ([`f13647d`](https://github.com/vantreeseba/sendspin-image-server/commit/f13647d37bf2077e18577d489347bf70709f5593))
+
+### Testing
+
+- Remove duplicate test and guard missing fixtures
+  ([`f93d264`](https://github.com/vantreeseba/sendspin-image-server/commit/f93d2644773222ebb99cc4745d5c5c030106bd04))
+
+
 ## v1.22.0 (2026-05-04)
 
 
