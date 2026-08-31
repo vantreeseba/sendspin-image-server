@@ -15,18 +15,18 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           token: ${{ secrets.GH_TOKEN }}
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
       - name: Install python-semantic-release
-        run: pip install python-semantic-release>=9.0
+        run: pip install python-semantic-release>=10.0
 
       - name: Run semantic-release
         id: release
