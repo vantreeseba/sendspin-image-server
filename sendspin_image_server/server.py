@@ -10,14 +10,12 @@ from typing import TYPE_CHECKING, Any
 
 import websockets
 import websockets.exceptions
-from websockets.server import ServerConnection, WebSocketServer
 
 from sendspin_image_server.client import (
+    ROLE_ARTWORK,
+    SUPPORTED_ROLES,
     ArtworkChannel,
     ClientState,
-    ROLE_ARTWORK,
-    ROLE_METADATA,
-    SUPPORTED_ROLES,
     server_time_us,
 )
 from sendspin_image_server.dither import DitheringAlgo, DitheringPalette
@@ -26,6 +24,9 @@ from sendspin_image_server.stream import (
 )
 
 if TYPE_CHECKING:
+    from websockets.asyncio.connection import Connection
+    from websockets.asyncio.server import Server, ServerConnection
+
     from sendspin_image_server.registry import EndpointRegistry
 
 logger = logging.getLogger(__name__)
@@ -40,7 +41,7 @@ class SendspinImageServer:
         self._server_id = server_id
         self._server_name = server_name
         self._clients: dict[str, ClientState] = {}
-        self._ws_server: WebSocketServer | None = None
+        self._ws_server: Server | None = None
         self._last_image: dict[str | None, bytes | None] = {None: None}
         self._last_image_channel: int = 0
         # url → task for server-initiated outbound connections
@@ -61,10 +62,19 @@ class SendspinImageServer:
     @property
     def last_image(self) -> bytes | None:
         """The most recently broadcast image bytes (global buffer), or None if none sent yet."""
-        last_image = self._last_image
-        if isinstance(last_image, dict):
-            return last_image.get(None)
-        return last_image
+        return self._last_image.get(None)
+
+    def last_image_for(self, client_id: str) -> bytes | None:
+        """Return the most recent image pushed to `client_id`, or None if none yet."""
+        return self._last_image.get(client_id)
+
+    def record_last_image(self, client_id: str, image_bytes: bytes) -> None:
+        """Remember the last image pushed to `client_id` for the debug endpoints."""
+        self._last_image[client_id] = image_bytes
+
+    def client_id_for_url(self, url: str) -> str | None:
+        """Return the client_id learned for an outbound `url`, or None if not handshaked."""
+        return self._url_to_client_id.get(url)
 
     @property
     def clients(self) -> dict[str, ClientState]:
@@ -83,7 +93,7 @@ class SendspinImageServer:
     async def start(self, host: str = "0.0.0.0", port: int = 8927) -> None:
         """Start the WebSocket server."""
         self._ws_server = await websockets.serve(
-            self._handle_connection,
+            self._serve_inbound,
             host,
             port,
             subprotocols=None,
@@ -173,7 +183,9 @@ class SendspinImageServer:
         await self._send_stream_start(client)
         return True
 
-    async def _outbound_connection_loop(self, url: str, connection_reason: str = "discovery") -> None:
+    async def _outbound_connection_loop(
+        self, url: str, connection_reason: str = "discovery"
+    ) -> None:
         """Retry loop for a server-initiated outbound WebSocket connection."""
         backoff = 1.0
         max_backoff = 300.0
@@ -194,7 +206,7 @@ class SendspinImageServer:
                         break
                 except asyncio.CancelledError:
                     raise
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 - retry loop must survive any failure
                     logger.debug("Outbound connection to %s failed: %s", url, exc)
 
                 logger.debug(
@@ -244,8 +256,8 @@ class SendspinImageServer:
             return_exceptions=True,
         )
         # Track post-dither message bytes per client for debug endpoints
-        for client, result in zip(artwork_clients, results):
-            if isinstance(result, Exception):
+        for client, result in zip(artwork_clients, results, strict=False):
+            if isinstance(result, BaseException):
                 logger.warning("Failed to push image to %s: %s", client.client_id, result)
             else:
                 self._last_image[client.client_id] = result
@@ -254,9 +266,13 @@ class SendspinImageServer:
     # WebSocket handler
     # ------------------------------------------------------------------
 
+    async def _serve_inbound(self, websocket: ServerConnection) -> None:
+        """Entry point for `websockets.serve`, which passes only the connection."""
+        await self._handle_connection(websocket)
+
     async def _handle_connection(
         self,
-        websocket: ServerConnection,
+        websocket: Connection,
         connection_reason: str = "discovery",
         source_url: str | None = None,
     ) -> str | None:
@@ -273,8 +289,9 @@ class SendspinImageServer:
         """
         # For inbound connections the path is available on the request; for
         # outbound connections we already connected to the correct path.
-        if hasattr(websocket, "request"):
-            path = websocket.request.path
+        request = getattr(websocket, "request", None)
+        if request is not None:
+            path = request.path
             if not path.rstrip("/").endswith("/sendspin"):
                 logger.debug("Rejecting connection to unknown path: %s", path)
                 await websocket.close(1008, "Unknown path")
@@ -322,7 +339,7 @@ class SendspinImageServer:
             if client.has_artwork and self.last_image is not None:
                 try:
                     await push_image_to_client(client, self.last_image, self._last_image_channel)
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 - a bad client must not break handshake
                     logger.warning(
                         "Failed to push cached image to new client %s: %s",
                         client.client_id,
@@ -365,7 +382,7 @@ class SendspinImageServer:
     # ------------------------------------------------------------------
 
     def _parse_client_hello(
-        self, msg: dict[str, Any], websocket: ServerConnection
+        self, msg: dict[str, Any], websocket: Connection
     ) -> ClientState:
         """Parse a client/hello message and return a ClientState."""
         payload = msg.get("payload", {})
@@ -397,16 +414,20 @@ class SendspinImageServer:
                         format=ch_cfg.get("format", "jpeg"),
                         media_width=media_width,
                         media_height=media_height,
-                        _channel_index=idx,
+                        channel_index=idx,
                     )
                 )
             if not artwork_channels:
                 artwork_channels = [ArtworkChannel()]
             for ch in artwork_channels:
-                size_str = f"{ch.media_width}x{ch.media_height}" if ch.media_width and ch.media_height else "unspecified"
+                size_str = (
+                    f"{ch.media_width}x{ch.media_height}"
+                    if ch.media_width and ch.media_height
+                    else "unspecified"
+                )
                 logger.info(
                     "Client %s artwork channel %d: source=%s format=%s requested=%s",
-                    client_id, ch._channel_index, ch.source, ch.format, size_str,
+                    client_id, ch.channel_index, ch.source, ch.format, size_str,
                 )
 
         return ClientState(
@@ -541,11 +562,12 @@ class SendspinImageServer:
 
         await self._send_stream_start(client)
 
-        # Per spec: after stream/start in response to stream/request-format, send immediate artwork update
+        # Per spec: after stream/start in response to stream/request-format,
+        # send an immediate artwork update
         if client.has_artwork and self.last_image is not None:
             try:
                 await push_image_to_client(client, self.last_image, self._last_image_channel)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - a bad client must not break handshake
                 logger.warning(
                     "Failed to push cached image after format request for %s: %s",
                     client.client_id,

@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    import websockets
+    from websockets.asyncio.connection import Connection
 
 logger = logging.getLogger(__name__)
 
@@ -28,14 +28,14 @@ class ArtworkChannel:
 
     _raw_width/_raw_height store the dimensions as declared by the client;
     media_width/media_height store the effective dimensions after any server
-    overrides are applied.  _channel_index is the position in the channels array.
+    overrides are applied.  channel_index is the position in the channels array.
     """
 
     source: str = "album"
     format: str = "jpeg"
     media_width: int | None = None
     media_height: int | None = None
-    _channel_index: int = field(default=0, repr=False)
+    channel_index: int = field(default=0, repr=False)
 
     @property
     def wants_e6_dither(self) -> bool:
@@ -49,7 +49,7 @@ class ClientState:
 
     client_id: str
     name: str
-    websocket: websockets.ServerConnection
+    websocket: Connection
     active_roles: list[str] = field(default_factory=list)
     artwork_channels: list[ArtworkChannel] = field(default_factory=list)
     stream_started: bool = False
