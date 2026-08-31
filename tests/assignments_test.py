@@ -7,6 +7,7 @@ calls), so no event loop is needed here.
 from __future__ import annotations
 
 import pathlib
+import tempfile
 from unittest.mock import MagicMock
 
 import pytest
@@ -15,7 +16,6 @@ from sendspin_image_server.assignments import ClientAssignmentManager
 from sendspin_image_server.client import ROLE_ARTWORK, ClientState
 from sendspin_image_server.endpoints import LocalFolderEndpoint
 from sendspin_image_server.registry import DevicePreset
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -30,7 +30,7 @@ def _server(clients=None, discovered=None):
 
 
 def _ep(eid: str = "ep1", name: str = "Endpoint") -> LocalFolderEndpoint:
-    return LocalFolderEndpoint(name=name, path=pathlib.Path("/tmp"), endpoint_id=eid)
+    return LocalFolderEndpoint(name=name, path=pathlib.Path(tempfile.gettempdir()), endpoint_id=eid)
 
 
 def _preset(
@@ -40,7 +40,9 @@ def _preset(
     palette: str = "e6",
     interval: float = 60.0,
 ) -> DevicePreset:
-    return DevicePreset(preset_id=pid, name=name, dither_algo=algo, dither_palette=palette, interval=interval)
+    return DevicePreset(
+        preset_id=pid, name=name, dither_algo=algo, dither_palette=palette, interval=interval
+    )
 
 
 def _manager(
@@ -174,7 +176,7 @@ class TestPresetAssignment:
 
     def test_assign_unknown_preset_raises(self):
         mgr = _manager()
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Preset ghost not found"):
             mgr.assign_preset_to_client("c1", "ghost")
 
     def test_preset_dither_algo_is_returned(self):

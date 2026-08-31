@@ -8,13 +8,13 @@ on teardown via registry.stop_all().
 from __future__ import annotations
 
 import pathlib
+import tempfile
 from unittest.mock import MagicMock
 
 import pytest
 
-from sendspin_image_server.registry import DevicePreset, EndpointRegistry
 from sendspin_image_server.endpoints import LocalFolderEndpoint
-
+from sendspin_image_server.registry import DevicePreset, EndpointRegistry
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -29,7 +29,7 @@ def _mock_server():
 
 
 def _ep(eid: str = "ep1", name: str = "Endpoint") -> LocalFolderEndpoint:
-    return LocalFolderEndpoint(name=name, path=pathlib.Path("/tmp"), endpoint_id=eid)
+    return LocalFolderEndpoint(name=name, path=pathlib.Path(tempfile.gettempdir()), endpoint_id=eid)
 
 
 # ---------------------------------------------------------------------------
@@ -92,7 +92,7 @@ class TestEndpointCRUD:
 
     async def test_add_duplicate_raises(self, registry_with_ep):
         reg, ep = registry_with_ep
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="already registered"):
             await reg.add_endpoint(ep, _persist=False)
 
     async def test_list_endpoints_returns_all(self, empty_registry):
@@ -122,7 +122,7 @@ class TestEndpointCRUD:
         assert empty_registry.default_endpoint_id == "ep2"
 
     async def test_default_endpoint_id_setter_raises_for_unknown(self, empty_registry):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="ghost"):
             empty_registry.default_endpoint_id = "ghost"
 
 
@@ -241,7 +241,7 @@ class TestClientAssignmentViaRegistry:
 
     async def test_assign_preset_unknown_raises(self, registry_with_ep):
         reg, _ = registry_with_ep
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Preset ghost not found"):
             reg.assign_preset_to_client("c1", "ghost")
 
     async def test_unassign_client(self, registry_with_ep):
@@ -265,5 +265,5 @@ class TestClientAssignmentViaRegistry:
         assert empty_registry.client_info() == []
 
     async def test_client_info_reflects_added_endpoints(self, registry_with_ep):
-        reg, ep = registry_with_ep
+        reg, _ep_unused = registry_with_ep
         assert isinstance(reg.client_info(), list)

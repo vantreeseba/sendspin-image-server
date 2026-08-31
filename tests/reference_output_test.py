@@ -13,7 +13,6 @@ produce different patterns — but we do require:
 
 from __future__ import annotations
 
-import io
 import pathlib
 
 import numpy as np
@@ -33,6 +32,8 @@ TOLERANCE = 0.20   # per-colour count may differ by up to 20 % of total pixels
 
 @pytest.fixture(scope="module")
 def reference() -> np.ndarray:
+    if not OUTPUT_BMP.exists():
+        pytest.skip(f"Reference image not found: {OUTPUT_BMP}")
     return np.array(Image.open(OUTPUT_BMP).convert("RGB"))
 
 

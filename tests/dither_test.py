@@ -10,7 +10,6 @@ Tests run in <1 ms each and are fully deterministic.
 from __future__ import annotations
 
 import io
-from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -18,6 +17,11 @@ from PIL import Image
 
 from sendspin_image_server import dither
 from sendspin_image_server.dither import (
+    _BAYER_OFFSETS,
+    _LUT_BITS,
+    _LUT_SHIFT,
+    _LUT_SIZE,
+    _LUT_STEP,
     BW_PALETTE_RGB,
     BW_PALETTE_SET,
     DITHER_ALGOS,
@@ -26,21 +30,15 @@ from sendspin_image_server.dither import (
     PALETTE_LABELS,
     PALETTE_RGB,
     PALETTE_SETS,
-    _BAYER_OFFSETS,
-    _LUT_BITS,
-    _LUT_SHIFT,
-    _LUT_SIZE,
-    _LUT_STEP,
     _build_lut,
-    _preprocess,
     _nearest,
-    _srgb_to_linear,
+    _preprocess,
     _rgb_to_lab,
+    _srgb_to_linear,
     dither_to_bytes,
     dither_to_pil,
     encode_pil,
 )
-
 
 # ===== SECTION: Constants and data structures ===
 
@@ -56,7 +54,7 @@ class TestPaletteConstants:
         assert (255, 255, 255) in BW_PALETTE_RGB
 
     def test_bw_palette_set_is_correct(self):
-        assert BW_PALETTE_SET == frozenset(BW_PALETTE_RGB)
+        assert frozenset(BW_PALETTE_RGB) == BW_PALETTE_SET
 
     def test_e6_palette_has_seven_colors(self):
         assert len(E6_PALETTE_RGB) == 7
@@ -69,14 +67,14 @@ class TestPaletteConstants:
             assert c in E6_PALETTE_RGB
 
     def test_e6_palette_set_is_correct(self):
-        assert E6_PALETTE_SET == frozenset(map(tuple, E6_PALETTE_RGB))
+        assert frozenset(map(tuple, E6_PALETTE_RGB)) == E6_PALETTE_SET
 
     def test_palette_sets_match_rgb_lists(self):
         for name, palette_rgb in PALETTE_RGB.items():
             assert PALETTE_SETS[name] == frozenset(map(tuple, palette_rgb))
 
     def test_all_rgb_pairs_are_valid(self):
-        for name, palette in PALETTE_RGB.items():
+        for palette in PALETTE_RGB.values():
             for r, g, b in palette:
                 assert 0 <= r <= 255
                 assert 0 <= g <= 255
@@ -325,7 +323,7 @@ class TestDitherToPilNoneAlgo:
         # With no dithering, all pixels should retain their original luminance.
         result = dither_to_pil(solid_jpeg, "none", "bw")
         arr = np.array(result)
-        unique = set(tuple(p) for p in arr.reshape(-1, 3))
+        unique = {tuple(p) for p in arr.reshape(-1, 3)}
         assert unique == {(128, 128, 128)}
 
     def test_output_dimensions_match_input(self, solid_jpeg: bytes):
@@ -347,28 +345,28 @@ class TestDitherToPilWithPalette:
     def test_floyd_steinberg_output_in_bw_palette(self, solid_jpeg: bytes):
         result = dither_to_pil(solid_jpeg, "floyd-steinberg", "bw")
         arr = np.array(result)
-        unique = set(tuple(p) for p in arr.reshape(-1, 3))
+        unique = {tuple(p) for p in arr.reshape(-1, 3)}
         for color in unique:
             assert color in BW_PALETTE_SET
 
     def test_floyd_steinberg_output_in_e6_palette(self, solid_jpeg: bytes):
         result = dither_to_pil(solid_jpeg, "floyd-steinberg", "e6")
         arr = np.array(result)
-        unique = set(tuple(p) for p in arr.reshape(-1, 3))
+        unique = {tuple(p) for p in arr.reshape(-1, 3)}
         for color in unique:
             assert color in E6_PALETTE_SET
 
     def test_atkinson_output_in_e6_palette(self, solid_jpeg: bytes):
         result = dither_to_pil(solid_jpeg, "atkinson", "e6")
         arr = np.array(result)
-        unique = set(tuple(p) for p in arr.reshape(-1, 3))
+        unique = {tuple(p) for p in arr.reshape(-1, 3)}
         for color in unique:
             assert color in E6_PALETTE_SET
 
     def test_ordered_output_in_e6_palette(self, solid_jpeg: bytes):
         result = dither_to_pil(solid_jpeg, "ordered", "e6")
         arr = np.array(result)
-        unique = set(tuple(p) for p in arr.reshape(-1, 3))
+        unique = {tuple(p) for p in arr.reshape(-1, 3)}
         for color in unique:
             assert color in E6_PALETTE_SET
 
@@ -383,7 +381,7 @@ class TestDitherToPilWithNonePalette:
     def test_has_more_than_6_unique_colors(self, large_jpeg: bytes):
         result = dither_to_pil(large_jpeg, "floyd-steinberg", "none")
         arr = np.array(result)
-        unique = set(tuple(p) for p in arr.reshape(-1, 3))
+        unique = {tuple(p) for p in arr.reshape(-1, 3)}
         assert len(unique) > 6  # gradient should produce many colors when not restricted
 
 
@@ -468,7 +466,8 @@ class TestDitherToBytes:
 
     def test_floyd_steinberg_serpentine_produces_bytes(self, solid_jpeg: bytes):
         r = dither_to_bytes(solid_jpeg, "floyd-steinberg-serpentine", "png", "bw")
-        assert isinstance(r, bytes) and len(r) > 0
+        assert isinstance(r, bytes)
+        assert len(r) > 0
 
     def test_atkinson_produces_output(self, solid_jpeg: bytes):
         result = dither_to_bytes(solid_jpeg, "atkinson", "png", "e6")
