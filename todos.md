@@ -40,13 +40,6 @@ Zero coverage across all modules. `test-plan.md` has a full proposed plan (~99 t
 
 ---
 
-### Backend: Fire-and-forget DB writes (A.2 partial)
-**Files:** `sendspin_image_server/assignments.py:86,100,113,129,151,202,212,217`, `registry.py:123,144,158,168,211`
-
-All CRUD operations spawn `asyncio.create_task(db.write(...))` but don't track the task handle. If a write fails, the error is silently dropped (only logged by asyncio's default exception handler). Consider wrapping in a helper that logs failures explicitly, or collect these short-lived tasks for error monitoring.
-
----
-
 ### Backend: Expose client grouping on the API (A.9)
 **File:** `sendspin_image_server/assignments.py:235-346` (`client_info()`)
 
@@ -152,6 +145,9 @@ On initial load, "No clients discovered" shows immediately, which is misleading.
 
 ## Done ✓
 
+- Fire-and-forget DB writes (A.2) — all `asyncio.create_task(db.write(...))` calls now go
+  through `tasks.spawn()`, which holds a strong reference until the task finishes and logs
+  any exception instead of dropping it
 - Split `EndpointRegistry` into `EndpointRegistry` + `ClientAssignmentManager` (A.1) — v1.9.0
 - Feed loop background tasks are tracked in `self._tasks` dict and cancelled on `stop_all()` — resolved in refactor
 - `registry` property getter correctly returns `self._registry` — no bug present
