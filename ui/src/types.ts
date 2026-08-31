@@ -23,6 +23,7 @@ export type DitheringPalette = 'none' | 'bw' | 'bwr' | 'bwy' | '4color' | 'e6';
 
 export const DITHERING_PALETTES: DitheringPalette[] = ['none', 'bw', 'bwr', 'bwy', '4color', 'e6'];
 
+// biome-ignore format: the columns are aligned on purpose
 export const PALETTE_LABELS: Record<DitheringPalette, string> = {
   none:      'Full Color (no dithering)',
   bw:        'Black & White',
