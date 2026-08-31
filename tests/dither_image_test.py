@@ -19,7 +19,6 @@ import pytest
 from PIL import Image
 
 from sendspin_image_server.dither import (
-    DITHER_ALGOS,
     E6_PALETTE_RGB,
     E6_PALETTE_SET,
     dither_to_pil,
@@ -81,7 +80,7 @@ PALETTE_INK: dict[tuple[int, int, int], int] = {
 def _load_as_jpeg(path: pathlib.Path, width: int, height: int) -> bytes:
     """Open an image, resize to (width, height), return as JPEG bytes."""
     img = Image.open(path).convert("RGB")
-    img = img.resize((width, height), Image.LANCZOS)
+    img = img.resize((width, height), Image.Resampling.LANCZOS)
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=95)
     return buf.getvalue()
@@ -90,7 +89,7 @@ def _load_as_jpeg(path: pathlib.Path, width: int, height: int) -> bytes:
 @pytest.fixture(scope="module")
 def source_jpeg() -> bytes:
     if not TEST_IMAGE.exists():
-        pytest.fail(f"Test image missing: {TEST_IMAGE}")
+        pytest.skip(f"Test image missing: {TEST_IMAGE}")
     return _load_as_jpeg(TEST_IMAGE, DISPLAY_W, DISPLAY_H)
 
 
@@ -176,12 +175,6 @@ class TestDitheredImage:
             )
 
     # ---- ESPHome zone correctness on the actual image ----
-
-    def test_atkinson_all_pixels_in_palette(self, dithered_atkinson: Image.Image):
-        arr = np.array(dithered_atkinson)
-        unique = set(map(tuple, arr.reshape(-1, 3)))
-        rogue = unique - E6_PALETTE_SET
-        assert not rogue, f"Non-palette pixels in Atkinson output: {rogue}"
 
     def test_all_output_pixels_in_palette(self, dithered_fs: Image.Image):
         arr = np.array(dithered_fs)

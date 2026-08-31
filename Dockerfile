@@ -1,38 +1,26 @@
-# ── Stage 1: use pre-built React UI ──────────────────────────────────────────────
-FROM node:24-slim AS ui-prebuilt
-
-WORKDIR /ui
-
-# Use pre-built dist (build locally first with: cd ui && npm run build)
-COPY ui/dist/ ./dist/
-
-# Copy package files for reference only
-COPY ui/package*.json ./
-
-# Note: For development, uncomment below and comment out COPY ui/dist/ above
-# COPY ui/ ./
-# RUN npm run build
-# Output is in /ui/dist/
-
-# ── Stage 2: Python server ────────────────────────────────────────────────────
+# ── Python server ─────────────────────────────────────────────────────────────
 FROM python:3.12-slim
 
-# Install uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+# Install uv (pinned so image builds are reproducible)
+COPY --from=ghcr.io/astral-sh/uv:0.12.7 /uv /usr/local/bin/uv
 
 WORKDIR /app
 
-# Copy dependency metadata first for layer caching
+# Install dependencies straight from pyproject.toml so this never drifts from
+# the declared dependency set. A stub package lets uv resolve and install the
+# dependencies in their own cacheable layer, before the source is copied in.
 COPY pyproject.toml ./
-
-# Install Python dependencies
-RUN uv pip install --system "websockets>=12.0" "zeroconf>=0.131.0" "aiohttp>=3.9.0" "Pillow>=10.0.0" "numpy>=1.26.0" "aiosqlite>=0.20.0"
+RUN mkdir -p sendspin_image_server \
+ && touch sendspin_image_server/__init__.py \
+ && uv pip install --system . \
+ && uv pip uninstall --system sendspin-image-server
 
 # Copy Python source
 COPY sendspin_image_server/ ./sendspin_image_server/
 
-# Copy the built UI into the package directory where cli.py expects it
-COPY --from=ui-prebuilt /ui/dist/ ./sendspin_image_server/ui_dist/
+# Copy the pre-built React UI into the package directory where cli.py expects it
+# (build it first with: cd ui && npm run build)
+COPY ui/dist/ ./sendspin_image_server/ui_dist/
 
 # Create empty images directory — mount your own images here at runtime:
 # docker run -v /host/photos:/app/images ...

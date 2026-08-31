@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import pathlib
 from typing import TYPE_CHECKING, Any
@@ -12,10 +11,11 @@ from sendspin_image_server.dither import DitheringAlgo, DitheringPalette
 from sendspin_image_server.endpoints import (
     CalibrationEndpoint,
     HomeAssistantEndpoint,
-    ImmichEndpoint,
     ImageEndpoint,
+    ImmichEndpoint,
     LocalFolderEndpoint,
 )
+from sendspin_image_server.tasks import spawn
 
 if TYPE_CHECKING:
     from sendspin_image_server.db import Database
@@ -42,7 +42,11 @@ class DevicePreset:
         self.interval = interval
 
     def __repr__(self) -> str:
-        return f"DevicePreset(id={self.preset_id!r}, name={self.name!r}, algo={self.dither_algo!r}, palette={self.dither_palette!r}, interval={self.interval}s)"
+        return (
+            f"DevicePreset(id={self.preset_id!r}, name={self.name!r}, "
+            f"algo={self.dither_algo!r}, palette={self.dither_palette!r}, "
+            f"interval={self.interval}s)"
+        )
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a JSON-safe dict for the REST API."""
@@ -60,11 +64,11 @@ class EndpointRegistry:
 
     def __init__(
         self,
-        server: "SendspinImageServer",
+        server: SendspinImageServer,
         interval: float,
         dither_algo: DitheringAlgo,
         dither_palette: DitheringPalette = "e6",
-        db: "Database | None" = None,
+        db: Database | None = None,
     ) -> None:
         self._server = server
         self._endpoints: dict[str, ImageEndpoint] = {}
@@ -115,33 +119,39 @@ class EndpointRegistry:
         if endpoint.endpoint_id in self._endpoints:
             raise ValueError(f"Endpoint {endpoint.endpoint_id!r} already registered")
         self._endpoints[endpoint.endpoint_id] = endpoint
-        if make_default or self._default_endpoint_id is None:
-            if endpoint.endpoint_id not in ("builtin-local", "builtin-remote"):
-                self._default_endpoint_id = endpoint.endpoint_id
+        if (make_default or self._default_endpoint_id is None) and endpoint.endpoint_id not in (
+            "builtin-local",
+            "builtin-remote",
+        ):
+            self._default_endpoint_id = endpoint.endpoint_id
         self._assignments.set_default_endpoint_id(self._default_endpoint_id)
-        if _persist and self._assignments._db is not None:
-            asyncio.create_task(
-                self._assignments._db.save_endpoint(
+        if _persist and self._assignments.db is not None:
+            spawn(
+                self._assignments.db.save_endpoint(
                     endpoint.endpoint_id,
                     endpoint.kind,
                     endpoint.name,
                     endpoint_to_config(endpoint),
-                )
+                ),
+                f"save_endpoint({endpoint.endpoint_id})",
             )
-        self._assignments._start_task(endpoint)
+        self._assignments.start_task(endpoint)
 
     async def remove_endpoint(self, endpoint_id: str) -> bool:
         if endpoint_id not in self._endpoints:
             return False
-        self._assignments._stop_task(endpoint_id)
+        self._assignments.stop_task(endpoint_id)
         del self._endpoints[endpoint_id]
         if self._default_endpoint_id == endpoint_id:
             self._default_endpoint_id = next(
                 (k for k, e in self._endpoints.items()), None
             )
             self._assignments.set_default_endpoint_id(self._default_endpoint_id)
-        if self._assignments._db is not None:
-            asyncio.create_task(self._assignments._db.delete_endpoint(endpoint_id))
+        if self._assignments.db is not None:
+            spawn(
+                self._assignments.db.delete_endpoint(endpoint_id),
+                f"delete_endpoint({endpoint_id})",
+            )
         return True
 
     def get_endpoint(self, endpoint_id: str) -> ImageEndpoint | None:
@@ -154,18 +164,26 @@ class EndpointRegistry:
 
     async def add_device_preset(self, preset: DevicePreset, *, _persist: bool = True) -> None:
         self._device_presets[preset.preset_id] = preset
-        if _persist and self._assignments._db is not None:
-            asyncio.create_task(
-                self._assignments._db.save_device_preset(
-                    preset.preset_id, preset.name, preset.dither_algo, preset.dither_palette, preset.interval,
-                )
+        if _persist and self._assignments.db is not None:
+            spawn(
+                self._assignments.db.save_device_preset(
+                    preset.preset_id,
+                    preset.name,
+                    preset.dither_algo,
+                    preset.dither_palette,
+                    preset.interval,
+                ),
+                f"save_device_preset({preset.preset_id})",
             )
         logger.info("Device preset added: %s id=%s", preset.name, preset.preset_id)
 
     async def remove_device_preset(self, preset_id: str) -> bool:
         found = self._device_presets.pop(preset_id, None) is not None
-        if found and self._assignments._db is not None:
-            asyncio.create_task(self._assignments._db.delete_device_preset(preset_id))
+        if found and self._assignments.db is not None:
+            spawn(
+                self._assignments.db.delete_device_preset(preset_id),
+                f"delete_device_preset({preset_id})",
+            )
         return found
 
     def get_device_preset(self, preset_id: str) -> DevicePreset | None:
@@ -196,22 +214,20 @@ class EndpointRegistry:
             preset.dither_palette = dither_palette
             changed = True
         if interval is not None and interval != preset.interval:
-            if isinstance(interval, str):
-                try:
-                    interval = float(interval)
-                except (TypeError, ValueError):
-                    pass
-                else:
-                    if interval < 0:
-                        raise ValueError("interval must be >= 0")
-            if interval != preset.interval:
-                preset.interval = float(interval)
-                changed = True
-        if changed and self._assignments._db is not None:
-            asyncio.create_task(
-                self._assignments._db.save_device_preset(
-                    preset.preset_id, preset.name, preset.dither_algo, preset.dither_palette, preset.interval,
-                )
+            if interval < 0:
+                raise ValueError("interval must be >= 0")
+            preset.interval = float(interval)
+            changed = True
+        if changed and self._assignments.db is not None:
+            spawn(
+                self._assignments.db.save_device_preset(
+                    preset.preset_id,
+                    preset.name,
+                    preset.dither_algo,
+                    preset.dither_palette,
+                    preset.interval,
+                ),
+                f"save_device_preset({preset.preset_id})",
             )
         return changed
 
@@ -257,8 +273,8 @@ class EndpointRegistry:
     def ensure_client(self, client_id: str, name: str, url: str | None = None) -> None:
         self._assignments.ensure_client(client_id, name, url)
 
-    def set_client_locked(self, client_id: str, locked: bool) -> None:
-        self._assignments.set_client_locked(client_id, locked)
+    def set_client_locked(self, client_id: str, *, locked: bool) -> None:
+        self._assignments.set_client_locked(client_id, locked=locked)
 
     def is_client_locked(self, client_id: str) -> bool:
         return self._assignments.is_client_locked(client_id)
@@ -282,18 +298,18 @@ class EndpointRegistry:
     # -- restore --
 
     async def restore_from_db(self, builtin_endpoint_id: str) -> None:
-        if self._assignments._db is None:
+        if self._assignments.db is None:
             return
-        db = self._assignments._db
+        db = self._assignments.db
 
         # Restore client last-known URLs and locked state
         client_urls = await db.load_client_urls()
         for cid, data in client_urls.items():
             url = data.get("last_known_url")
             if url:
-                self._assignments._client_last_url[cid] = str(url)
+                self._assignments.restore_client_url(cid, str(url))
             if data.get("locked"):
-                self._assignments._client_locked[cid] = True
+                self._assignments.restore_client_locked(cid)
 
         # Restore endpoints (same logic as old registry.py)
         rows = await db.load_endpoints()
@@ -332,15 +348,12 @@ class EndpointRegistry:
             else:
                 logger.warning("Unknown endpoint kind %r in DB, skipping id=%s", kind, eid)
                 continue
-            if ep is not None:
-                self._endpoints[ep.endpoint_id] = ep
-                self._assignments._start_task(ep)
-                if self._default_endpoint_id is None:
-                    self._default_endpoint_id = ep.endpoint_id
-                    self._assignments.set_default_endpoint_id(self._default_endpoint_id)
-                logger.info("Restored endpoint from DB: %s (%s) id=%s", name, kind, eid)
-            else:
-                logger.warning("Failed to restore endpoint id=%s", eid)
+            self._endpoints[ep.endpoint_id] = ep
+            self._assignments.start_task(ep)
+            if self._default_endpoint_id is None:
+                self._default_endpoint_id = ep.endpoint_id
+                self._assignments.set_default_endpoint_id(self._default_endpoint_id)
+            logger.info("Restored endpoint from DB: %s (%s) id=%s", name, kind, eid)
 
         # Restore presets
         presets = await db.load_device_presets()
@@ -356,7 +369,7 @@ class EndpointRegistry:
                 interval=preset_data["interval"],
             )
             self._device_presets[pid] = preset
-            self._assignments._device_presets[pid] = preset
+            self._assignments.restore_device_preset(pid, preset)
             logger.info("Restored device preset from DB: %s id=%s", preset.name, pid)
 
         # Restore assignments
@@ -368,15 +381,17 @@ class EndpointRegistry:
             dither_palette = row.get("dither_palette", "e6")
             interval = float(row.get("interval", 0))
             if preset_id and preset_id in self._device_presets:
-                self._assignments._preset_assignments[client_id] = preset_id
-                logger.info("Restored preset assignment: client %s → preset %s", client_id, preset_id)
-            elif endpoint_id in self._endpoints:
-                self._assignments._assignments[client_id] = endpoint_id
-                self._assignments._client_dither[client_id] = dither_algo  # type: ignore[assignment]
-                self._assignments._client_palette[client_id] = dither_palette  # type: ignore[assignment]
-                self._assignments._client_interval[client_id] = interval
+                self._assignments.restore_preset_assignment(client_id, preset_id)
                 logger.info(
-                    "Restored assignment: client %s → endpoint %s (dither=%s, palette=%s, interval=%ss)",
+                    "Restored preset assignment: client %s → preset %s", client_id, preset_id
+                )
+            elif endpoint_id in self._endpoints:
+                self._assignments.restore_assignment(
+                    client_id, endpoint_id, dither_algo, dither_palette, interval
+                )
+                logger.info(
+                    "Restored assignment: client %s → endpoint %s "
+                    "(dither=%s, palette=%s, interval=%ss)",
                     client_id, endpoint_id, dither_algo, dither_palette,
                     interval if interval > 0 else "default",
                 )
@@ -395,17 +410,17 @@ class EndpointRegistry:
 
 def endpoint_to_config(ep: ImageEndpoint) -> dict[str, Any]:
     """Convert an endpoint to a DB-serialisable config dict."""
-    if ep.kind == "local" and hasattr(ep, "path"):
+    if isinstance(ep, LocalFolderEndpoint):
         return {"path": str(ep.path)}
-    if ep.kind == "immich" and hasattr(ep, "base_url"):
+    if isinstance(ep, ImmichEndpoint):
         return {"base_url": ep.base_url, "album_id": ep.album_id, "api_key": ep.api_key}
-    if ep.kind == "homeassistant" and hasattr(ep, "base_url"):
+    if isinstance(ep, HomeAssistantEndpoint):
         return {
             "base_url": ep.base_url,
             "token": ep.token,
             "media_content_id": ep.media_content_id,
         }
-    if ep.kind == "calibration":
+    if isinstance(ep, CalibrationEndpoint):
         return {}
     d = ep.to_dict()
     return {k: v for k, v in d.items() if k not in ("id", "kind", "name")}

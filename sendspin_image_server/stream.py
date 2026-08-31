@@ -10,7 +10,12 @@ import struct
 from PIL import Image
 
 from sendspin_image_server.client import ClientState, server_time_us
-from sendspin_image_server.dither import DitheringAlgo, DitheringPalette, dither_to_bytes, encode_pil
+from sendspin_image_server.dither import (
+    DitheringAlgo,
+    DitheringPalette,
+    dither_to_bytes,
+    encode_pil,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +59,7 @@ def _resize_for_channel(
     scaled_h = round(orig_h * scale)
 
     src_rgb = src.convert("RGB")
-    scaled = src_rgb.resize((scaled_w, scaled_h), Image.LANCZOS)
+    scaled = src_rgb.resize((scaled_w, scaled_h), Image.Resampling.LANCZOS)
 
     canvas = Image.new("RGB", (max_width, max_height), (255, 255, 255))
     offset_x = (max_width - scaled_w) // 2
@@ -129,8 +134,9 @@ async def push_image_to_client(
     else:
         # Re-encode to the client's requested format even without dithering
         def _reencode(data: bytes, fmt: str) -> bytes:
-            from PIL import Image as _Image
             import io as _io
+
+            from PIL import Image as _Image
             img = _Image.open(_io.BytesIO(data)).convert("RGB")
             return encode_pil(img, fmt)
 

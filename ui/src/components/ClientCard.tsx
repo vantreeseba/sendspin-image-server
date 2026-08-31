@@ -260,8 +260,13 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
               className="shrink-0 border-red-800 text-red-400 text-xs hover:bg-red-900/20"
             >
               {deleting ? (
-                <><Loader2 className="mr-1 h-3 w-3 animate-spin" />Forgetting…</>
-              ) : 'Forget'}
+                <>
+                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                  Forgetting…
+                </>
+              ) : (
+                'Forget'
+              )}
             </Button>
           </div>
         </div>
@@ -385,8 +390,13 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
               className="flex-1 text-xs"
             >
               {busy ? (
-                <><Loader2 className="mr-1 h-3 w-3 animate-spin" />Saving…</>
-              ) : 'Update'}
+                <>
+                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                  Saving…
+                </>
+              ) : (
+                'Update'
+              )}
             </Button>
             {client.status === 'connected' && (
               <Button
@@ -397,8 +407,13 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
                 className="flex-1 text-xs"
               >
                 {pushing ? (
-                  <><Loader2 className="mr-1 h-3 w-3 animate-spin" />Pushing…</>
-                ) : 'Push Now'}
+                  <>
+                    <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                    Pushing…
+                  </>
+                ) : (
+                  'Push Now'
+                )}
               </Button>
             )}
           </div>
@@ -414,8 +429,13 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
             className="mt-2 w-full text-xs"
           >
             {connecting ? (
-              <><Loader2 className="mr-1 h-3 w-3 animate-spin" />Connecting…</>
-            ) : 'Force Connect'}
+              <>
+                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                Connecting…
+              </>
+            ) : (
+              'Force Connect'
+            )}
           </Button>
         )}
 

@@ -10,7 +10,7 @@ requires-python = ">=3.12"
 license = { text = "Apache-2.0" }
 
 dependencies = [
-  "websockets>=12.0",
+  "websockets>=14.0",
   "zeroconf>=0.131.0",
   "aiohttp>=3.9.0",
   "Pillow>=10.0.0",
@@ -23,9 +23,11 @@ sendspin-image-server = "sendspin_image_server.cli:main"
 
 [project.optional-dependencies]
 dev = [
-  "mypy==1.18.2",
-  "ruff==0.14.5",
-  "python-semantic-release>=9.0",
+  "mypy==2.3.1",
+  "ruff==0.16.5",
+  "pytest>=9.0",
+  "pytest-asyncio>=1.0",
+  "python-semantic-release>=10.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -66,7 +68,45 @@ ignore = [
   "TRY400",
   "COM812",
   "S104",
+  # House style, deliberately not adopted:
+  "CPY001",  # no copyright headers anywhere in the project
+  "D102",    # methods are not individually documented (D100/D101/D103 still apply)
+  "D105",    # ditto for dunders
+  "D107",    # ditto for __init__
+  "PLC0415", # heavy imports (aiohttp, PIL) are deferred on purpose
+  "N806",    # matrix/geometry locals use maths conventions (W, H, M, COLS)
+  "RUF002",  # docstrings use real typographic characters (—, ×)
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests are not library code: they need no docstrings or annotations, and
+# reaching into internals is how several of them assert behaviour.
+"tests/*" = [
+  "ANN001",
+  "ANN201",
+  "ANN202",
+  "D100",
+  "D101",
+  "D102",
+  "D103",
+  "INP001",
+  "PLR0911",
+  "RUF001",
+  "SLF001",
+]
+
+# Thresholds sit just above the worst offender that is *not* explicitly
+# suppressed, so they act as a ratchet: nothing may get more complex than
+# what is already here. See todos.md for the functions worth splitting.
+[tool.ruff.lint.mccabe]
+max-complexity = 18
+
+[tool.ruff.lint.pylint]
+max-returns = 9
+max-branches = 20
+max-statements = 60
+max-args = 9
+max-positional-args = 9
 
 [tool.ruff.lint.pydocstyle]
 convention = "pep257"

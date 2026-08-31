@@ -79,7 +79,9 @@ export default function App() {
             ) : (
               (() => {
                 const connected = clients.filter((c) => c.status === 'connected');
-                const offline = clients.filter((c) => !c.discovered_only && c.status !== 'connected');
+                const offline = clients.filter(
+                  (c) => !c.discovered_only && c.status !== 'connected',
+                );
                 const discovered = clients.filter((c) => c.discovered_only);
                 return (
                   <div className="space-y-5">
@@ -90,7 +92,12 @@ export default function App() {
                         </p>
                         <div className="grid gap-3 sm:grid-cols-2">
                           {connected.map((c) => (
-                            <ClientCard key={c.id} client={c} endpoints={endpoints ?? []} onChanged={refresh} />
+                            <ClientCard
+                              key={c.id}
+                              client={c}
+                              endpoints={endpoints ?? []}
+                              onChanged={refresh}
+                            />
                           ))}
                         </div>
                       </div>
@@ -102,7 +109,12 @@ export default function App() {
                         </p>
                         <div className="grid gap-3 sm:grid-cols-2">
                           {offline.map((c) => (
-                            <ClientCard key={c.id} client={c} endpoints={endpoints ?? []} onChanged={refresh} />
+                            <ClientCard
+                              key={c.id}
+                              client={c}
+                              endpoints={endpoints ?? []}
+                              onChanged={refresh}
+                            />
                           ))}
                         </div>
                       </div>
@@ -114,7 +126,12 @@ export default function App() {
                         </p>
                         <div className="grid gap-3 sm:grid-cols-2">
                           {discovered.map((c) => (
-                            <ClientCard key={c.id} client={c} endpoints={endpoints ?? []} onChanged={refresh} />
+                            <ClientCard
+                              key={c.id}
+                              client={c}
+                              endpoints={endpoints ?? []}
+                              onChanged={refresh}
+                            />
                           ))}
                         </div>
                       </div>

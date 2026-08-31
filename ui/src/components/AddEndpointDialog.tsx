@@ -176,9 +176,8 @@ export function AddEndpointDialog({ open, onClose, onAdded }: Props) {
           {kind === 'calibration' && (
             <p className="text-muted-foreground text-xs">
               Displays a 6-block colour chart — one solid block per e-paper ink colour — labelled
-              with name, RGB values, and the ESPHome nibble value. Assign a client to this
-              endpoint and observe the physical display to determine whether each ink maps
-              correctly.
+              with name, RGB values, and the ESPHome nibble value. Assign a client to this endpoint
+              and observe the physical display to determine whether each ink maps correctly.
             </p>
           )}
 

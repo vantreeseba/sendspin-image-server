@@ -1,32 +1,43 @@
 name: Release
 
+# Runs only after CI passes on main, so a release can never be cut from a
+# red commit. The release commit carries [skip ci], which skips the CI run
+# and therefore cannot trigger another release.
 on:
-  push:
-    branches:
-      - main
+  workflow_run:
+    workflows: ["CI"]
+    types:
+      - completed
 
 jobs:
   release:
     runs-on: ubuntu-latest
     concurrency: release
+    # workflow_run fires for every CI run, including pull requests and
+    # failures, so narrow it to a green run of a push to main.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
     permissions:
       id-token: write
       contents: write
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
+          ref: ${{ github.event.workflow_run.head_branch }}
           fetch-depth: 0
           token: ${{ secrets.GH_TOKEN }}
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
       - name: Install python-semantic-release
-        run: pip install python-semantic-release>=9.0
+        run: pip install python-semantic-release>=10.0
 
       - name: Run semantic-release
         id: release

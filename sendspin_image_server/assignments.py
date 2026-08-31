@@ -5,10 +5,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from sendspin_image_server.dither import DitheringAlgo, DitheringPalette
 from sendspin_image_server.endpoints import ImageEndpoint
+from sendspin_image_server.tasks import spawn
 
 if TYPE_CHECKING:
     from sendspin_image_server.db import Database
@@ -66,7 +67,10 @@ class ClientAssignmentManager:
         *,
         preset_id: str | None = None,
     ) -> bool:
-        """Point a client at a specific endpoint, optionally assigning a preset. Returns False if endpoint not found."""
+        """Point a client at an endpoint, optionally assigning a preset.
+
+        Returns False if the endpoint is not found.
+        """
         if self._endpoints is None or endpoint_id not in self._endpoints:
             return False
         if preset_id and (self._device_presets is None or preset_id not in self._device_presets):
@@ -84,8 +88,11 @@ class ClientAssignmentManager:
         palette = self._client_palette.get(client_id, self._dither_palette)
         interval = self._client_interval.get(client_id, 0)
         if self._db is not None:
-            asyncio.create_task(
-                self._db.save_assignment(client_id, endpoint_id, algo, palette, interval, preset_id)
+            spawn(
+                self._db.save_assignment(
+                    client_id, endpoint_id, algo, palette, interval, preset_id
+                ),
+                f"save_assignment({client_id})",
             )
         logger.info("Client %s assigned to endpoint %s", client_id, endpoint_id)
         return True
@@ -98,8 +105,11 @@ class ClientAssignmentManager:
         interval = self._client_interval.get(client_id, 0)
         preset_id = self._preset_assignments.get(client_id)
         if self._db is not None and endpoint_id:
-            asyncio.create_task(
-                self._db.save_assignment(client_id, endpoint_id, algo, palette, interval, preset_id)
+            spawn(
+                self._db.save_assignment(
+                    client_id, endpoint_id, algo, palette, interval, preset_id
+                ),
+                f"save_assignment({client_id})",
             )
         logger.info("Client %s dither algo set to %s", client_id, algo)
 
@@ -111,8 +121,11 @@ class ClientAssignmentManager:
         interval = self._client_interval.get(client_id, 0)
         preset_id = self._preset_assignments.get(client_id)
         if self._db is not None and endpoint_id:
-            asyncio.create_task(
-                self._db.save_assignment(client_id, endpoint_id, algo, palette, interval, preset_id)
+            spawn(
+                self._db.save_assignment(
+                    client_id, endpoint_id, algo, palette, interval, preset_id
+                ),
+                f"save_assignment({client_id})",
             )
         logger.info("Client %s dither palette set to %s", client_id, palette)
 
@@ -127,8 +140,11 @@ class ClientAssignmentManager:
         palette = self._client_palette.get(client_id, self._dither_palette)
         preset_id = self._preset_assignments.get(client_id)
         if self._db is not None and endpoint_id:
-            asyncio.create_task(
-                self._db.save_assignment(client_id, endpoint_id, algo, palette, interval, preset_id)
+            spawn(
+                self._db.save_assignment(
+                    client_id, endpoint_id, algo, palette, interval, preset_id
+                ),
+                f"save_assignment({client_id})",
             )
         logger.info(
             "Client %s interval set to %ss", client_id, interval if interval > 0 else "default"
@@ -136,10 +152,11 @@ class ClientAssignmentManager:
 
     def assign_preset_to_client(self, client_id: str, preset_id: str | None) -> None:
         """Assign or unassign a device preset for a client."""
-        if preset_id is not None:
-            if self._device_presets is None or preset_id not in self._device_presets:
-                msg = f"Preset {preset_id} not found"
-                raise ValueError(msg)
+        if preset_id is not None and (
+            self._device_presets is None or preset_id not in self._device_presets
+        ):
+            msg = f"Preset {preset_id} not found"
+            raise ValueError(msg)
         self._preset_assignments[client_id] = preset_id
         # Clear per-client overrides when using a preset (they will be re-applied if set later)
         if preset_id:
@@ -149,7 +166,7 @@ class ClientAssignmentManager:
         if self._db is not None:
             # Always use the default endpoint when persisting preset assignments
             endpoint_id = self._default_endpoint_id or ""
-            asyncio.create_task(
+            spawn(
                 self._db.save_assignment(
                     client_id,
                     endpoint_id,
@@ -157,26 +174,27 @@ class ClientAssignmentManager:
                     self._dither_palette,
                     0,
                     preset_id,
-                )
+                ),
+                f"save_assignment({client_id})",
             )
         logger.info("Client %s preset assignment updated: %s", client_id, preset_id)
 
     def client_dither_algo(self, client_id: str) -> DitheringAlgo:
         """Return the effective dither algorithm for a client."""
         if client_id in self._client_dither:
-            return cast("DitheringAlgo", self._client_dither[client_id])
+            return self._client_dither[client_id]
         preset_id = self._preset_assignments.get(client_id)
         if preset_id and self._device_presets is not None and preset_id in self._device_presets:
-            return cast("DitheringAlgo", self._device_presets[preset_id].dither_algo)
+            return self._device_presets[preset_id].dither_algo
         return self._dither_algo
 
     def client_dither_palette(self, client_id: str) -> DitheringPalette:
         """Return the effective dither palette for a client."""
         if client_id in self._client_palette:
-            return cast("DitheringPalette", self._client_palette[client_id])
+            return self._client_palette[client_id]
         preset_id = self._preset_assignments.get(client_id)
         if preset_id and self._device_presets is not None and preset_id in self._device_presets:
-            return cast("DitheringPalette", self._device_presets[preset_id].dither_palette)
+            return self._device_presets[preset_id].dither_palette
         return self._dither_palette
 
     def client_interval(self, client_id: str) -> float:
@@ -200,7 +218,10 @@ class ClientAssignmentManager:
         if url is not None:
             self._client_last_url[client_id] = url
             if self._db is not None:
-                asyncio.create_task(self._db.upsert_client_url(client_id, name, url))
+                spawn(
+                    self._db.upsert_client_url(client_id, name, url),
+                    f"upsert_client_url({client_id})",
+                )
             logger.debug("Recorded last-known URL for client %s (%s): %s", client_id, name, url)
         else:
             logger.debug("Recorded client %s (%s) without URL", client_id, name)
@@ -210,13 +231,16 @@ class ClientAssignmentManager:
         self._assignments.pop(client_id, None)
         self._preset_assignments.pop(client_id, None)
         if self._db is not None:
-            asyncio.create_task(self._db.delete_assignment(client_id))
+            spawn(self._db.delete_assignment(client_id), f"delete_assignment({client_id})")
 
-    def set_client_locked(self, client_id: str, locked: bool) -> None:
+    def set_client_locked(self, client_id: str, *, locked: bool) -> None:
         """Lock or unlock a client. Locked clients are auto-reconnected on discovery."""
         self._client_locked[client_id] = locked
         if self._db is not None:
-            asyncio.create_task(self._db.set_client_locked(client_id, locked))
+            spawn(
+                self._db.set_client_locked(client_id, locked=locked),
+                f"set_client_locked({client_id})",
+            )
         logger.info("Client %s locked=%s", client_id, locked)
 
     def is_client_locked(self, client_id: str) -> bool:
@@ -233,7 +257,7 @@ class ClientAssignmentManager:
     def delete_client(self, client_id: str) -> None:
         """Forget a client entirely — removes DB record and in-memory state."""
         if self._db is not None:
-            asyncio.create_task(self._db.delete_client(client_id))
+            spawn(self._db.delete_client(client_id), f"delete_client({client_id})")
         self._assignments.pop(client_id, None)
         self._preset_assignments.pop(client_id, None)
         self._client_last_url.pop(client_id, None)
@@ -244,7 +268,7 @@ class ClientAssignmentManager:
 
     # ---- Default endpoint (delegated from EndpointRegistry) ----
 
-    def set_default_endpoint_id(self, value: str) -> None:
+    def set_default_endpoint_id(self, value: str | None) -> None:
         self._default_endpoint_id = value
 
     # ---- Serialization ----
@@ -376,22 +400,64 @@ class ClientAssignmentManager:
 
     def stop_all(self) -> None:
         for eid in list(self._tasks):
-            self._stop_task(eid)
+            self.stop_task(eid)
 
     async def wait_stopped(self) -> None:
         if self._tasks:
             await asyncio.gather(*self._tasks.values(), return_exceptions=True)
 
+    # ---- Restore from persistence ----
+    #
+    # EndpointRegistry.restore_from_db() drives these at startup. They seed
+    # state directly without re-persisting it, which the public setters would.
+
+    def restore_client_url(self, client_id: str, url: str) -> None:
+        """Seed a client's last-known URL from persisted state."""
+        self._client_last_url[client_id] = url
+
+    def restore_client_locked(self, client_id: str) -> None:
+        """Mark a client as locked from persisted state."""
+        self._client_locked[client_id] = True
+
+    def restore_device_preset(self, preset_id: str, preset: DevicePreset) -> None:
+        """Seed a device preset from persisted state."""
+        if self._device_presets is None:
+            return
+        self._device_presets[preset_id] = preset
+
+    def restore_preset_assignment(self, client_id: str, preset_id: str) -> None:
+        """Seed a client's preset assignment from persisted state."""
+        self._preset_assignments[client_id] = preset_id
+
+    def restore_assignment(
+        self,
+        client_id: str,
+        endpoint_id: str,
+        algo: DitheringAlgo,
+        palette: DitheringPalette,
+        interval: float,
+    ) -> None:
+        """Seed a client's endpoint assignment and dither overrides from persisted state."""
+        self._assignments[client_id] = endpoint_id
+        self._client_dither[client_id] = algo
+        self._client_palette[client_id] = palette
+        self._client_interval[client_id] = interval
+
     # ---- Feed loop infrastructure ----
 
-    def _start_task(self, endpoint: ImageEndpoint) -> None:
+    @property
+    def db(self) -> Database | None:
+        """The database this manager persists through, if any."""
+        return self._db
+
+    def start_task(self, endpoint: ImageEndpoint) -> None:
         task = asyncio.create_task(
             self._feed_loop(endpoint),
             name=f"endpoint-{endpoint.endpoint_id}",
         )
         self._tasks[endpoint.endpoint_id] = task
 
-    def _stop_task(self, endpoint_id: str) -> None:
+    def stop_task(self, endpoint_id: str) -> None:
         task = self._tasks.pop(endpoint_id, None)
         if task is not None:
             task.cancel()
@@ -442,7 +508,9 @@ class ClientAssignmentManager:
                     push_time = time.monotonic()
                     for c, result in zip(due_clients, results, strict=False):
                         if isinstance(result, Exception):
-                            logger.exception("Failed to push to client %s", c.client_id, exc_info=result)
+                            logger.error(
+                                "Failed to push to client %s", c.client_id, exc_info=result
+                            )
                         else:
                             last_push[c.client_id] = push_time
                 elif all_clients:
@@ -486,4 +554,4 @@ async def _push(
     )
     # Track per-client image for debug endpoints
     if sent_bytes is not None:
-        server._last_image[client.client_id] = sent_bytes
+        server.record_last_image(client.client_id, sent_bytes)
