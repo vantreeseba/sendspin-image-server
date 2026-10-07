@@ -762,7 +762,7 @@ def main() -> None:
         choices=list(DITHER_PALETTES),
         help=(
             "Default dithering palette for clients without an explicit override "
-            "(none=full color, bw=black&white, e6=6-color e-Paper)"
+            "(none=full color, bw=black&white, e6=6-color Spectra 6, e7=7-color ACeP)"
         ),
     )
     _data_dir_default = os.environ.get("DATA_DIR")

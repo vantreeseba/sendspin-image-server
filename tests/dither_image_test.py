@@ -113,8 +113,8 @@ def dithered_atkinson(source_jpeg: bytes) -> Image.Image:
 class TestPaletteColors:
     """Verify the Spectra 6 physical ink palette entries are sane."""
 
-    def test_seven_palette_entries(self):
-        assert len(E6_PALETTE_RGB) == 7
+    def test_six_palette_entries(self):
+        assert len(E6_PALETTE_RGB) == 6
 
     def test_all_values_in_range(self):
         for r, g, b in E6_PALETTE_RGB:
@@ -128,8 +128,8 @@ class TestPaletteColors:
     def test_white_is_in_palette(self):
         assert (255, 255, 255) in [tuple(int(v) for v in c) for c in E6_PALETTE_RGB]
 
-    def test_all_seven_colours_distinct(self):
-        assert len(set(map(tuple, E6_PALETTE_RGB))) == 7
+    def test_all_six_colours_distinct(self):
+        assert len(set(map(tuple, E6_PALETTE_RGB))) == 6
 
 
 # ---------------------------------------------------------------------------

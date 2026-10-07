@@ -1,4 +1,4 @@
-"""Dithering to configurable palettes (e.g. the 7.3" e-Paper ACeP six-color palette).
+"""Dithering to configurable palettes (e.g. the 7.3" Spectra 6 e-Paper six-color palette).
 
 Supported algorithms (select via the *algo* argument):
 
@@ -14,6 +14,7 @@ Supported palettes:
   none  — no palette restriction (full color, dithering disabled)
   bw    — black and white (binary; two-color)
   e6    — Waveshare Spectra E6 six-color palette (Black, White, Green, Blue, Red, Yellow)
+  e7    — ACeP seven-color palette (the six above plus Orange)
 
 Floyd-Steinberg uses PIL's quantize() — the same method as Waveshare's official Python
 driver — with the pure primary/secondary palette colours. PIL's C implementation is
@@ -73,7 +74,8 @@ _ACT_MAP: Final[dict[str, tuple[str, str]]] = {
     "Black-White-Red":    ("bwr",       "Black, White & Red"),
     "Black-White-Yellow": ("bwy",       "Black, White & Yellow"),
     "4-color":            ("4color",    "4-Color"),
-    "N-color":            ("e6",        "E-Paper 7-Color (ACeP)"),
+    "6-color":            ("e6",        "E-Paper 6-Color (Spectra 6)"),
+    "N-color":            ("e7",        "E-Paper 7-Color (ACeP)"),
 }
 
 # Build palette registry from .act files at import time.
@@ -95,7 +97,7 @@ for _act_path in sorted(_TABLES_DIR.glob("*.act")):
         logger.warning("Failed to load palette %r from %s: %s", _key, _act_path, _e)
 
 # "none" is always available — no quantisation, full colour passthrough.
-DitheringPalette = Literal["none", "bw", "bwr", "bwy", "4color", "e6"]
+DitheringPalette = Literal["none", "bw", "bwr", "bwy", "4color", "e6", "e7"]
 DITHER_PALETTES: Final[tuple[str, ...]] = ("none", *_LOADED_PALETTES)
 
 PALETTE_LABELS: Final[dict[str, str]] = {
@@ -106,6 +108,7 @@ PALETTE_LABELS: Final[dict[str, str]] = {
 # Convenience aliases kept for backwards compatibility
 BW_PALETTE_RGB: Final[list[tuple[int, int, int]]] = _LOADED_PALETTES["bw"]
 E6_PALETTE_RGB: Final[list[tuple[int, int, int]]] = _LOADED_PALETTES["e6"]
+E7_PALETTE_RGB: Final[list[tuple[int, int, int]]] = _LOADED_PALETTES["e7"]
 
 PALETTE_RGB: Final[dict[str, list[tuple[int, int, int]]]] = dict(_LOADED_PALETTES)
 
@@ -114,6 +117,7 @@ PALETTE_SETS: Final[dict[str, frozenset[tuple[int, int, int]]]] = {
 }
 
 E6_PALETTE_SET: Final[frozenset[tuple[int, int, int]]] = PALETTE_SETS["e6"]
+E7_PALETTE_SET: Final[frozenset[tuple[int, int, int]]] = PALETTE_SETS["e7"]
 BW_PALETTE_SET: Final[frozenset[tuple[int, int, int]]] = PALETTE_SETS["bw"]
 
 DitheringAlgo = Literal[
