@@ -31,6 +31,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Longest wait between outbound reconnect attempts. Kept short because battery
+# devices are only reachable for a brief window each time they wake.
+_MAX_RECONNECT_BACKOFF = 15.0
+
 SERVER_VERSION = 1
 
 
@@ -46,6 +50,8 @@ class SendspinImageServer:
         self._last_image_channel: int = 0
         # url → task for server-initiated outbound connections
         self._outbound_tasks: dict[str, asyncio.Task[None]] = {}
+        # url → event that cuts a reconnect backoff short (set when the client is seen again)
+        self._outbound_wake: dict[str, asyncio.Event] = {}
         # url → url: all URLs we are tracking (discovered via mDNS or connect_to_client)
         self._discovered_clients: dict[str, str] = {}
         # url → mDNS instance name (e.g. "photo-frame-2")
@@ -115,10 +121,19 @@ class SendspinImageServer:
         """Start a persistent server-initiated connection to a client URL.
 
         The connection is maintained automatically: if the client disconnects
-        it will be retried with exponential backoff (up to 5 minutes), unless
-        the client sent client/goodbye with reason 'another_server'.
+        it will be retried with exponential backoff (capped at
+        `_MAX_RECONNECT_BACKOFF`), unless the client sent client/goodbye with
+        reason 'another_server'.
+
+        Calling this again for a URL that is already managed retries it right
+        away instead of waiting out the backoff, which is how a battery device
+        announcing itself after deep sleep gets picked up inside its short
+        awake window.
         """
         if url in self._outbound_tasks:
+            wake = self._outbound_wake.get(url)
+            if wake is not None:
+                wake.set()
             return  # already managing this URL
         # Register as discovered immediately — before any handshake succeeds.
         self._discovered_clients[url] = url
@@ -183,18 +198,27 @@ class SendspinImageServer:
         await self._send_stream_start(client)
         return True
 
+    def _served_by_endpoint(self, client_id: str) -> bool:
+        """Return True if an endpoint feed loop is responsible for this client's images."""
+        return (
+            self._registry is not None
+            and self._registry.effective_endpoint_id(client_id) is not None
+        )
+
     async def _outbound_connection_loop(
         self, url: str, connection_reason: str = "discovery"
     ) -> None:
         """Retry loop for a server-initiated outbound WebSocket connection."""
         backoff = 1.0
-        max_backoff = 300.0
+        wake = asyncio.Event()
+        self._outbound_wake[url] = wake
         try:
             while True:
                 try:
                     async with websockets.connect(url) as websocket:
                         logger.info("Server-initiated connection established to %s", url)
                         backoff = 1.0  # reset on successful connect
+                        wake.clear()
                         goodbye_reason = await self._handle_connection(
                             websocket, connection_reason=connection_reason, source_url=url,
                         )
@@ -212,14 +236,26 @@ class SendspinImageServer:
                 logger.debug(
                     "Reconnecting to %s in %.1fs", url, backoff
                 )
-                await asyncio.sleep(backoff)
-                backoff = min(backoff * 2, max_backoff)
+                try:
+                    await asyncio.wait_for(wake.wait(), timeout=backoff)
+                except TimeoutError:
+                    backoff = min(backoff * 2, _MAX_RECONNECT_BACKOFF)
+                else:
+                    # The client was seen again (mDNS), so start over with a fresh backoff.
+                    logger.debug("Client at %s seen again, reconnecting now", url)
+                    backoff = 1.0
+                wake.clear()
         except asyncio.CancelledError:
             pass
         finally:
-            self._outbound_tasks.pop(url, None)
-            # Clear client_id mapping when the outbound loop exits entirely.
-            self._url_to_client_id.pop(url, None)
+            # reconnect_to_client may already have replaced this loop with a new
+            # one, whose entries must be left alone.
+            if self._outbound_wake.get(url) is wake:
+                del self._outbound_wake[url]
+            if self._outbound_tasks.get(url) is asyncio.current_task():
+                del self._outbound_tasks[url]
+                # Clear client_id mapping when the outbound loop exits entirely.
+                self._url_to_client_id.pop(url, None)
 
     async def broadcast_image(
         self,
@@ -335,8 +371,15 @@ class SendspinImageServer:
             await self._send_stream_start(client)
             client.stream_started = True
 
-            # Step 3b: immediately send last known image to new artwork clients
-            if client.has_artwork and self.last_image is not None:
+            # Step 3b: immediately send last known image to new artwork clients.
+            # Clients fed by an endpoint are skipped: the feed loop pushes to them
+            # as soon as they connect, and a frame that sleeps after its first
+            # image would otherwise refresh with this stale one.
+            if (
+                client.has_artwork
+                and self.last_image is not None
+                and not self._served_by_endpoint(client.client_id)
+            ):
                 try:
                     await push_image_to_client(client, self.last_image, self._last_image_channel)
                 except Exception as exc:  # noqa: BLE001 - a bad client must not break handshake

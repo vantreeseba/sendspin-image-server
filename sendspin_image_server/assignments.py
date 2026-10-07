@@ -464,7 +464,10 @@ class ClientAssignmentManager:
 
     async def _feed_loop(self, endpoint: ImageEndpoint) -> None:
         logger.info("Feed loop started: %s (%s)", endpoint.name, endpoint.kind)
-        last_push: dict[str, float] = {}
+        # client_id → (connection it was pushed to, when). Keeping the connection
+        # makes a client that reconnects due at once, so a frame waking from deep
+        # sleep gets its image inside its short awake window.
+        last_push: dict[str, tuple[Any, float]] = {}
         while True:
             try:
                 now = time.monotonic()
@@ -479,7 +482,7 @@ class ClientAssignmentManager:
                 due_clients = [
                     c
                     for c in all_clients
-                    if now - last_push.get(c.client_id, 0) >= self._effective_interval(c.client_id)
+                    if self._is_due(c, last_push.get(c.client_id), now)
                 ]
                 if due_clients:
                     data = await endpoint.fetch_next()
@@ -512,7 +515,7 @@ class ClientAssignmentManager:
                                 "Failed to push to client %s", c.client_id, exc_info=result
                             )
                         else:
-                            last_push[c.client_id] = push_time
+                            last_push[c.client_id] = (c, push_time)
                 elif all_clients:
                     logger.debug("Endpoint %r: no clients due yet, skipping fetch", endpoint.name)
                 else:
@@ -525,6 +528,15 @@ class ClientAssignmentManager:
                     endpoint.name,
                 )
             await asyncio.sleep(1)
+
+    def _is_due(self, client: Any, last: tuple[Any, float] | None, now: float) -> bool:
+        """Return True if `client` is new on this connection or its interval is up."""
+        if last is None:
+            return True
+        pushed_to, pushed_at = last
+        if pushed_to is not client:
+            return True
+        return now - pushed_at >= self._effective_interval(client.client_id)
 
     def _effective_interval(self, client_id: str) -> float:
         """Return the interval to use for a client, falling back to server default."""

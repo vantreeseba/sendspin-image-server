@@ -1,14 +1,15 @@
 """Tier 2 — Tests for ClientAssignmentManager.
 
-All methods under test are synchronous (db=None eliminates asyncio.create_task
-calls), so no event loop is needed here.
+Most methods under test are synchronous (db=None eliminates asyncio.create_task
+calls); only the feed-loop tests at the bottom need an event loop.
 """
 
 from __future__ import annotations
 
+import asyncio
 import pathlib
 import tempfile
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -351,3 +352,69 @@ class TestClientInfo:
         mgr.set_client_dither("c1", "floyd-steinberg")
         result = mgr.client_info()
         assert result[0]["dither_algo"] == "floyd-steinberg"
+
+
+# ---------------------------------------------------------------------------
+# Feed loop
+# ---------------------------------------------------------------------------
+
+
+def _feed_client(cid: str = "frame") -> MagicMock:
+    client = MagicMock()
+    client.client_id = cid
+    client.has_artwork = True
+    client.stream_started = True
+    return client
+
+
+class TestFeedLoop:
+    @pytest.fixture
+    def pushes(self, monkeypatch: pytest.MonkeyPatch) -> asyncio.Queue:
+        sent: asyncio.Queue = asyncio.Queue()
+
+        async def _fake_push(_server, client, _data, _algo, _palette="e6") -> None:
+            sent.put_nowait(client)
+
+        monkeypatch.setattr("sendspin_image_server.assignments._push", _fake_push)
+        return sent
+
+    @pytest.fixture
+    def endpoint(self) -> MagicMock:
+        ep = MagicMock()
+        ep.endpoint_id = "ep1"
+        ep.name = "Endpoint"
+        ep.fetch_next = AsyncMock(return_value=b"image")
+        return ep
+
+    async def test_reconnected_client_is_pushed_to_without_waiting(self, pushes, endpoint):
+        """A frame back from deep sleep gets an image even though its interval is not up."""
+        first = _feed_client()
+        srv = _server(clients={"frame": first})
+        mgr = ClientAssignmentManager(srv, interval=3600, dither_algo="none")
+        mgr.set_default_endpoint_id("ep1")
+
+        task = asyncio.create_task(mgr._feed_loop(endpoint))
+        try:
+            assert await asyncio.wait_for(pushes.get(), 5) is first
+            # Same client_id, new connection object.
+            second = _feed_client()
+            srv.clients = {"frame": second}
+            assert await asyncio.wait_for(pushes.get(), 5) is second
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def test_connected_client_waits_for_its_interval(self, pushes, endpoint):
+        client = _feed_client()
+        srv = _server(clients={"frame": client})
+        mgr = ClientAssignmentManager(srv, interval=3600, dither_algo="none")
+        mgr.set_default_endpoint_id("ep1")
+
+        task = asyncio.create_task(mgr._feed_loop(endpoint))
+        try:
+            await asyncio.sleep(1.3)  # long enough for a second pass of the loop
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        assert pushes.get_nowait() is client
+        assert pushes.empty()
