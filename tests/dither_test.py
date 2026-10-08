@@ -27,6 +27,8 @@ from sendspin_image_server.dither import (
     DITHER_ALGOS,
     E6_PALETTE_RGB,
     E6_PALETTE_SET,
+    E7_PALETTE_RGB,
+    E7_PALETTE_SET,
     PALETTE_LABELS,
     PALETTE_RGB,
     PALETTE_SETS,
@@ -56,15 +58,19 @@ class TestPaletteConstants:
     def test_bw_palette_set_is_correct(self):
         assert frozenset(BW_PALETTE_RGB) == BW_PALETTE_SET
 
-    def test_e6_palette_has_seven_colors(self):
-        assert len(E6_PALETTE_RGB) == 7
+    def test_e6_palette_has_six_colors(self):
+        assert len(E6_PALETTE_RGB) == 6
 
     def test_e6_palette_contains_expected_colors(self):
+        # Waveshare Spectra 6 palette (Waveshare epd7in3e official values)
+        expected = {(0, 0, 0), (255, 255, 255), (0, 255, 0),
+                    (0, 0, 255), (255, 0, 0), (255, 255, 0)}
+        assert set(E6_PALETTE_RGB) == expected
+
+    def test_e7_palette_is_e6_plus_orange(self):
         # Waveshare ACeP 7-colour palette (Waveshare epd7in3f official values)
-        expected = [(0, 0, 0), (255, 255, 255), (0, 255, 0),
-                    (0, 0, 255), (255, 0, 0), (255, 255, 0), (255, 128, 0)]
-        for c in expected:
-            assert c in E6_PALETTE_RGB
+        assert len(E7_PALETTE_RGB) == 7
+        assert E6_PALETTE_SET | {(255, 128, 0)} == E7_PALETTE_SET
 
     def test_e6_palette_set_is_correct(self):
         assert frozenset(map(tuple, E6_PALETTE_RGB)) == E6_PALETTE_SET
@@ -269,9 +275,13 @@ class TestNearest:
         r, g, b = _nearest(240, 220, 30, "e6")
         assert (r, g, b) == (255, 255, 0)
 
-    def test_orange_snaps_to_orange(self):
-        r, g, b = _nearest(220, 100, 10, "e6")
+    def test_orange_snaps_to_orange_on_e7(self):
+        r, g, b = _nearest(220, 100, 10, "e7")
         assert (r, g, b) == (255, 128, 0)
+
+    def test_orange_stays_in_palette_on_e6(self):
+        r, g, b = _nearest(220, 100, 10, "e6")
+        assert (r, g, b) in E6_PALETTE_SET
 
     def test_nearest_returns_color_from_palette(self):
         r, g, b = _nearest(255, 255, 255, "e6")

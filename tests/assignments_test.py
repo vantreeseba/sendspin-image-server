@@ -1,14 +1,15 @@
 """Tier 2 — Tests for ClientAssignmentManager.
 
-All methods under test are synchronous (db=None eliminates asyncio.create_task
-calls), so no event loop is needed here.
+Most methods under test are synchronous (db=None eliminates asyncio.create_task
+calls); only the feed-loop tests at the bottom need an event loop.
 """
 
 from __future__ import annotations
 
+import asyncio
 import pathlib
 import tempfile
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -351,3 +352,167 @@ class TestClientInfo:
         mgr.set_client_dither("c1", "floyd-steinberg")
         result = mgr.client_info()
         assert result[0]["dither_algo"] == "floyd-steinberg"
+
+
+# ---------------------------------------------------------------------------
+# Feed loop
+# ---------------------------------------------------------------------------
+
+
+def _feed_client(cid: str = "frame") -> MagicMock:
+    client = MagicMock()
+    client.client_id = cid
+    client.has_artwork = True
+    client.stream_started = True
+    return client
+
+
+class TestFeedLoop:
+    @pytest.fixture
+    def pushes(self, monkeypatch: pytest.MonkeyPatch) -> asyncio.Queue:
+        sent: asyncio.Queue = asyncio.Queue()
+
+        async def _fake_push(_server, client, _data, _algo, _palette="e6") -> None:
+            sent.put_nowait(client)
+
+        monkeypatch.setattr("sendspin_image_server.assignments._push", _fake_push)
+        return sent
+
+    @pytest.fixture
+    def endpoint(self) -> MagicMock:
+        ep = MagicMock()
+        ep.endpoint_id = "ep1"
+        ep.name = "Endpoint"
+        ep.fetch_next = AsyncMock(return_value=b"image")
+        return ep
+
+    async def test_reconnected_client_is_pushed_to_without_waiting(self, pushes, endpoint):
+        """A frame back from deep sleep gets an image even though its interval is not up."""
+        first = _feed_client()
+        srv = _server(clients={"frame": first})
+        mgr = ClientAssignmentManager(srv, interval=3600, dither_algo="none")
+        mgr.set_default_endpoint_id("ep1")
+
+        task = asyncio.create_task(mgr._feed_loop(endpoint))
+        try:
+            assert await asyncio.wait_for(pushes.get(), 5) is first
+            # Same client_id, new connection object.
+            second = _feed_client()
+            srv.clients = {"frame": second}
+            assert await asyncio.wait_for(pushes.get(), 5) is second
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def test_connected_client_waits_for_its_interval(self, pushes, endpoint):
+        client = _feed_client()
+        srv = _server(clients={"frame": client})
+        mgr = ClientAssignmentManager(srv, interval=3600, dither_algo="none")
+        mgr.set_default_endpoint_id("ep1")
+
+        task = asyncio.create_task(mgr._feed_loop(endpoint))
+        try:
+            await asyncio.sleep(1.3)  # long enough for a second pass of the loop
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        assert pushes.get_nowait() is client
+        assert pushes.empty()
+
+    async def test_connecting_client_is_served_without_waiting_for_the_next_pass(
+        self, pushes, endpoint
+    ):
+        srv = _server()
+        mgr = ClientAssignmentManager(srv, interval=3600, dither_algo="none")
+        mgr.set_default_endpoint_id("ep1")
+
+        task = asyncio.create_task(mgr._feed_loop(endpoint))
+        try:
+            await asyncio.sleep(0.1)  # the loop is now waiting out its one-second pass
+            client = _feed_client()
+            srv.clients = {"frame": client}
+            mgr.client_connected("frame")
+            assert await asyncio.wait_for(pushes.get(), 0.5) is client
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def test_next_image_is_fetched_ahead_of_the_next_push(self, pushes, endpoint):
+        srv = _server(clients={"frame": _feed_client()})
+        mgr = ClientAssignmentManager(srv, interval=3600, dither_algo="none")
+        mgr.set_default_endpoint_id("ep1")
+
+        task = asyncio.create_task(mgr._feed_loop(endpoint))
+        try:
+            await asyncio.wait_for(pushes.get(), 5)
+            await asyncio.sleep(0.05)
+            # One image was pushed and the next is already waiting.
+            assert endpoint.fetch_next.await_count == 2
+
+            srv.clients = {"frame": _feed_client()}
+            mgr.client_connected("frame")
+            await asyncio.wait_for(pushes.get(), 5)
+            await asyncio.sleep(0.05)
+            # The reconnect used the waiting image, then one more was fetched ahead.
+            assert endpoint.fetch_next.await_count == 3
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+
+# ---------------------------------------------------------------------------
+# Presence
+# ---------------------------------------------------------------------------
+
+
+class TestPresence:
+    def _info(self, mgr: ClientAssignmentManager, client_id: str) -> dict:
+        return next(c for c in mgr.client_info() if c["id"] == client_id)
+
+    def _offline_manager(self) -> ClientAssignmentManager:
+        mgr = ClientAssignmentManager(_server(), interval=60, dither_algo="none")
+        mgr.ensure_client("frame", "Kitchen Frame")
+        return mgr
+
+    def test_unassigned_client_stays_listed_by_name_after_it_disconnects(self):
+        mgr = self._offline_manager()
+        mgr.client_connected("frame")
+        mgr.client_disconnected("frame")
+
+        info = self._info(mgr, "frame")
+        assert info["status"] == "disconnected"
+        assert info["name"] == "Kitchen Frame"
+        assert info["explicit_assignment"] is False
+
+    def test_client_that_never_came_back_is_not_sleeping(self):
+        mgr = self._offline_manager()
+        mgr.client_connected("frame")
+        mgr.client_disconnected("frame")
+
+        info = self._info(mgr, "frame")
+        assert info["sleeping"] is False
+        assert info["last_seen"] is not None
+
+    def test_client_on_a_sleep_cycle_is_sleeping(self):
+        mgr = self._offline_manager()
+        mgr.client_connected("frame")
+        mgr.client_disconnected("frame")
+        mgr.client_connected("frame")
+        mgr.client_disconnected("frame")
+
+        info = self._info(mgr, "frame")
+        assert info["sleeping"] is True
+        assert info["wake_interval"] is not None
+
+    def test_client_long_overdue_is_offline(self, monkeypatch: pytest.MonkeyPatch):
+        mgr = self._offline_manager()
+        mgr.client_connected("frame")
+        mgr.client_disconnected("frame")
+        mgr.client_connected("frame")
+        mgr.client_disconnected("frame")
+
+        import time as _time
+
+        later = _time.time() + 3600
+        monkeypatch.setattr("sendspin_image_server.assignments.time.time", lambda: later)
+        assert self._info(mgr, "frame")["sleeping"] is False

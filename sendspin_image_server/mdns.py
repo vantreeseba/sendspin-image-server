@@ -118,8 +118,8 @@ class MDNSAdvertiser:
 class MDNSDiscovery:
     """Discovers Sendspin clients via mDNS (_sendspin._tcp.local.).
 
-    Calls `on_client_added(url)` when a client is found and
-    `on_client_removed(url)` when it disappears.
+    Calls `on_client_added(url, name)` when a client is found, and again each
+    time it re-announces itself, and `on_client_removed(url)` when it disappears.
     """
 
     def __init__(
@@ -198,11 +198,16 @@ class MDNSDiscovery:
                     break
 
         url = f"ws://{address}:{port}{path}"
+        display_name = name.split("._", 1)[0]
         if self._known.get(name) == url:
-            return  # already connected
+            # Announced again, e.g. a battery device waking from deep sleep.
+            # Pass it on so a pending reconnect happens now rather than after
+            # its backoff.
+            logger.debug("mDNS: Sendspin client '%s' announced again at %s", name, url)
+            self._on_client_added(url, display_name)
+            return
 
         self._known[name] = url
-        display_name = name.split("._", 1)[0]
         logger.info("mDNS: discovered Sendspin client '%s' at %s", name, url)
         self._on_client_added(url, display_name)
 

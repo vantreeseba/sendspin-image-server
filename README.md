@@ -170,7 +170,7 @@ Pulls images from the Home Assistant Media Browser. The server browses the media
 
 ## Dithering
 
-E-Paper displays can only show a small number of colours — the Waveshare 7.3" ACeP panel, for example, has exactly six inks. Dithering is the technique of mixing those six colours together in fine patterns to simulate the thousands of shades in a photograph.
+E-Paper displays can only show a small number of colours — the Waveshare 7.3" Spectra 6 panel, for example, has exactly six inks. Dithering is the technique of mixing those six colours together in fine patterns to simulate the thousands of shades in a photograph.
 
 The server applies a small contrast and saturation boost before dithering (1.2× and 1.3× respectively) to compensate for the muted look e-Paper palettes can produce on real-world images.
 
@@ -180,7 +180,11 @@ The server applies a small contrast and saturation boost before dithering (1.2×
 |----------------|--------------------------------------------------------|
 | `none`         | No palette restriction — pass the image through as-is |
 | `bw`           | Black and white only                                   |
-| `e6`           | 6-colour ACeP e-Paper (default)                        |
+| `bwr`          | Black, white and red                                   |
+| `bwy`          | Black, white and yellow                                |
+| `4color`       | Black, white, red and yellow                           |
+| `e6`           | 6-colour Spectra 6 e-Paper (default)                   |
+| `e7`           | 7-colour ACeP e-Paper (the six below plus orange)      |
 
 **E-Paper 6-Color palette:**
 

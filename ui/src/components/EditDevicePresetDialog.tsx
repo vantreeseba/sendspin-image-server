@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import type { DevicePreset } from '@/types';
+import type { DevicePreset, DitheringPalette } from '@/types';
 import { DITHERING_ALGOS, DITHERING_PALETTES, PALETTE_LABELS } from '@/types';
 
 interface Props {
@@ -93,7 +93,7 @@ export function EditDevicePresetDialog({ preset, open, onOpenChange, onSave }: P
             <Label htmlFor="edit-palette">Palette</Label>
             <Select
               value={currentDitherPalette}
-              onValueChange={(v) => setDitherPalette(v as 'none' | 'bw' | 'e6')}
+              onValueChange={(v) => setDitherPalette(v as DitheringPalette)}
             >
               <SelectTrigger id="edit-palette">
                 <SelectValue placeholder="Select palette" />

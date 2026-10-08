@@ -19,9 +19,17 @@ export const DITHERING_ALGOS: DitheringAlgo[] = [
   'ordered',
 ];
 
-export type DitheringPalette = 'none' | 'bw' | 'bwr' | 'bwy' | '4color' | 'e6';
+export type DitheringPalette = 'none' | 'bw' | 'bwr' | 'bwy' | '4color' | 'e6' | 'e7';
 
-export const DITHERING_PALETTES: DitheringPalette[] = ['none', 'bw', 'bwr', 'bwy', '4color', 'e6'];
+export const DITHERING_PALETTES: DitheringPalette[] = [
+  'none',
+  'bw',
+  'bwr',
+  'bwy',
+  '4color',
+  'e6',
+  'e7',
+];
 
 // biome-ignore format: the columns are aligned on purpose
 export const PALETTE_LABELS: Record<DitheringPalette, string> = {
@@ -30,7 +38,8 @@ export const PALETTE_LABELS: Record<DitheringPalette, string> = {
   bwr:       'Black, White & Red',
   bwy:       'Black, White & Yellow',
   '4color':  '4-Color',
-  e6:        'E-Paper 7-Color (ACeP)',
+  e6:        'E-Paper 6-Color (Spectra 6)',
+  e7:        'E-Paper 7-Color (ACeP)',
 };
 
 export interface Client {
@@ -51,6 +60,9 @@ export interface Client {
   mdns_name?: string | null;
   locked: boolean;
   preset_id?: string | null;
+  last_seen?: number | null; // epoch seconds of the last disconnect; null while connected
+  wake_interval?: number | null; // seconds it was last away before coming back
+  sleeping?: boolean; // offline, but on a sleep cycle and expected back
 }
 
 export interface Endpoint {

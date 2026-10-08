@@ -126,10 +126,12 @@ connect_to_client(url)
             1. recv client/hello
             2. send server/hello  (with connection_reason)
             3. send stream/start
-            4. push last_image to new client (if any)
+            4. push last_image to new client (if any, and only when no
+               endpoint feeds it — the feed loop pushes to those on connect)
             5. send server/state (metadata clients only)
             6. message loop until disconnect or client/goodbye
-       ↑ on disconnect: exponential backoff (1s → 2s → 4s … cap 300s)
+       ↑ on disconnect: exponential backoff (1s → 2s → 4s … cap 15s)
+       ↑ on mDNS re-announce: retry immediately, backoff reset
        ↑ on goodbye reason "another_server": stop retrying
 ```
 
@@ -137,7 +139,23 @@ When `MDNSDiscovery` fires `on_client_removed`, the corresponding outbound task 
 
 ### Exponential backoff
 
-The retry loop starts at 1 second, doubles on each failure, and caps at 300 seconds (5 minutes). A successful connection resets the backoff to 1 second.
+The retry loop starts at 1 second, doubles on each failure, and caps at 15 seconds. A successful connection resets the backoff to 1 second.
+
+The cap is short on purpose: a battery device that deep-sleeps is only reachable for a brief window each time it wakes. For the same reason, `MDNSDiscovery` reports a client every time it announces itself, and `connect_to_client` on a URL that is already managed cuts the current backoff short and retries at once.
+
+### Push on connect
+
+Each endpoint feed loop remembers which connection it last pushed to, per client. A client that reconnects is a new connection, so it is due immediately rather than after the rest of its interval. Together with the fast reconnect above, a frame waking from deep sleep gets its next image within a few seconds.
+
+Two more things keep that window short. The feed loop is woken the moment a client finishes its handshake, instead of noticing it on its next one-second pass. And after every push it fetches the following image in the background, so the next client that is due gets an image that is already in memory rather than waiting on Immich or Home Assistant.
+
+### Client-initiated connections
+
+A client may also dial the server itself (`ws://<server>:8927/sendspin`), which skips mDNS discovery altogether. If the server dials the same client at the same time, the client keeps one connection and closes the other; the server tracks every live connection per client and keeps serving whichever one survives.
+
+### Sleeping clients
+
+The server notes when each client's last connection closed, and how long it was away the last time it came back. A disconnected client that has come back before is reported as `sleeping` (with `last_seen` and `wake_interval`) until it is more than twice its last cycle plus a minute overdue, after which it is plain offline. This is held in memory only, so it starts fresh after a server restart.
 
 ### `goodbye` reason `another_server`
 
