@@ -35,6 +35,16 @@ interface Props {
   onChanged: () => void;
 }
 
+function formatDuration(seconds: number): string {
+  if (seconds < 90) {
+    return `${Math.max(1, Math.round(seconds))}s`;
+  }
+  if (seconds < 90 * 60) {
+    return `${Math.round(seconds / 60)} min`;
+  }
+  return `${(seconds / 3600).toFixed(1)} h`;
+}
+
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex items-baseline gap-2">
@@ -195,9 +205,11 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
   const cardClass =
     client.status === 'connected'
       ? 'border-l-4 border-l-green-600'
-      : isDiscovered
-        ? 'opacity-60'
-        : 'border-l-4 border-l-amber-600/60 opacity-60';
+      : client.sleeping
+        ? 'border-l-4 border-l-sky-600 opacity-80'
+        : isDiscovered
+          ? 'opacity-60'
+          : 'border-l-4 border-l-amber-600/60 opacity-60';
 
   return (
     <Card className={cardClass}>
@@ -211,6 +223,14 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
                 className="shrink-0 border-green-600 px-2 py-0.5 text-green-400 text-xs"
               >
                 Online
+              </Badge>
+            ) : client.sleeping ? (
+              <Badge
+                variant="outline"
+                className="shrink-0 border-sky-500 px-2 py-0.5 text-sky-400 text-xs"
+                title="On a sleep cycle — it will reconnect when it next wakes"
+              >
+                Sleeping
               </Badge>
             ) : client.discovered_only ? (
               <Badge
@@ -276,6 +296,12 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
         <Row label="ID">{client.id}</Row>
         {client.mdns_name && <Row label="mDNS">{client.mdns_name}</Row>}
         {client.discovered_url && <Row label="URL">{client.discovered_url}</Row>}
+        {client.last_seen != null && (
+          <Row label="Last seen">{formatDuration(Date.now() / 1000 - client.last_seen)} ago</Row>
+        )}
+        {client.sleeping && client.wake_interval != null && (
+          <Row label="Wakes every">about {formatDuration(client.wake_interval)}</Row>
+        )}
         {ch && (
           <>
             <Row label="Resolution">
