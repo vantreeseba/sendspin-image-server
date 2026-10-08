@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -54,3 +55,26 @@ class TestOutboundReconnect:
         finally:
             server.disconnect_from_client(URL)
             await asyncio.sleep(0)
+
+
+class TestDuplicateConnections:
+    def test_closing_the_newer_connection_falls_back_to_the_older(self):
+        server = SendspinImageServer(server_id="s", server_name="Server")
+        older, newer = MagicMock(client_id="frame"), MagicMock(client_id="frame")
+        server._connections["frame"] = [older, newer]
+        server._clients["frame"] = newer
+
+        server._forget_connection(newer)
+        assert server.clients["frame"] is older
+
+        server._forget_connection(older)
+        assert "frame" not in server.clients
+
+    def test_closing_the_older_connection_keeps_the_newer(self):
+        server = SendspinImageServer(server_id="s", server_name="Server")
+        older, newer = MagicMock(client_id="frame"), MagicMock(client_id="frame")
+        server._connections["frame"] = [older, newer]
+        server._clients["frame"] = newer
+
+        server._forget_connection(older)
+        assert server.clients["frame"] is newer

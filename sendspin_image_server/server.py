@@ -45,6 +45,10 @@ class SendspinImageServer:
         self._server_id = server_id
         self._server_name = server_name
         self._clients: dict[str, ClientState] = {}
+        # client_id → every live connection, oldest first. A client can briefly
+        # hold two (it dialled us while we dialled it) before it drops one;
+        # `_clients` always points at the newest.
+        self._connections: dict[str, list[ClientState]] = {}
         self._ws_server: Server | None = None
         self._last_image: dict[str | None, bytes | None] = {None: None}
         self._last_image_channel: int = 0
@@ -197,6 +201,18 @@ class SendspinImageServer:
             return False
         await self._send_stream_start(client)
         return True
+
+    def _forget_connection(self, client: ClientState) -> None:
+        """Drop a closed connection, falling back to an older live one if there is one."""
+        remaining = [c for c in self._connections.get(client.client_id, []) if c is not client]
+        if remaining:
+            self._connections[client.client_id] = remaining
+            self._clients[client.client_id] = remaining[-1]
+            return
+        self._connections.pop(client.client_id, None)
+        self._clients.pop(client.client_id, None)
+        if self._registry is not None:
+            self._registry.client_disconnected(client.client_id)
 
     def _served_by_endpoint(self, client_id: str) -> bool:
         """Return True if an endpoint feed loop is responsible for this client's images."""
@@ -352,6 +368,7 @@ class SendspinImageServer:
             # can match the discovered entry to its known identity.
             if source_url is not None:
                 self._url_to_client_id[source_url] = client.client_id
+            self._connections.setdefault(client.client_id, []).append(client)
             self._clients[client.client_id] = client
             # Persist the last-known URL so offline clients can be force-reconnected.
             if self._registry is not None:
@@ -370,6 +387,8 @@ class SendspinImageServer:
             # Step 3: send stream/start
             await self._send_stream_start(client)
             client.stream_started = True
+            if self._registry is not None:
+                self._registry.client_connected(client.client_id)
 
             # Step 3b: immediately send last known image to new artwork clients.
             # Clients fed by an endpoint are skipped: the feed loop pushes to them
@@ -415,7 +434,7 @@ class SendspinImageServer:
             logger.exception("Unhandled error in connection handler")
         finally:
             if client is not None:
-                self._clients.pop(client.client_id, None)
+                self._forget_connection(client)
                 logger.info("Client disconnected: %s (%s)", client.name, client.client_id)
 
         return goodbye_reason

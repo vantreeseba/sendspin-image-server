@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 from typing import TYPE_CHECKING, Any
@@ -20,6 +21,9 @@ if TYPE_CHECKING:
 _NO_DITHER_SENTINEL: DitheringAlgo = "none"
 
 logger = logging.getLogger(__name__)
+
+# How late a sleeping client may be, on top of twice its last cycle, before it counts as offline.
+_SLEEP_GRACE = 60.0
 
 
 class ClientAssignmentManager:
@@ -53,6 +57,14 @@ class ClientAssignmentManager:
         self._client_last_url: dict[str, str] = {}
         self._client_locked: dict[str, bool] = {}
         self._tasks: dict[str, asyncio.Task[None]] = {}
+        # endpoint_id → event that makes its feed loop look at the clients right away
+        self._feed_wake: dict[str, asyncio.Event] = {}
+        # client_id → name from its last hello, so an offline client keeps its name
+        self._client_names: dict[str, str] = {}
+        # client_id → wall-clock time it last disconnected (not kept across restarts)
+        self._last_seen: dict[str, float] = {}
+        # client_id → how long it was last away before coming back, in seconds
+        self._wake_interval: dict[str, float] = {}
         self._default_endpoint_id: str | None = _default_endpoint_id
         # Mutable references to registry-owned dicts (set before this is constructed)
         self._endpoints = _endpoints
@@ -214,6 +226,7 @@ class ClientAssignmentManager:
         Called after a successful hello handshake so that offline clients
         can later be force-reconnected using their stored URL.
         """
+        self._client_names[client_id] = name
         # Only track URL if one was provided.
         if url is not None:
             self._client_last_url[client_id] = url
@@ -225,6 +238,39 @@ class ClientAssignmentManager:
             logger.debug("Recorded last-known URL for client %s (%s): %s", client_id, name, url)
         else:
             logger.debug("Recorded client %s (%s) without URL", client_id, name)
+
+    def client_connected(self, client_id: str) -> None:
+        """Note that a client finished its handshake and let the feed loops serve it now."""
+        last_seen = self._last_seen.get(client_id)
+        if last_seen is not None:
+            self._wake_interval[client_id] = time.time() - last_seen
+        for wake in self._feed_wake.values():
+            wake.set()
+
+    def client_disconnected(self, client_id: str) -> None:
+        """Note when a client's last connection closed."""
+        self._last_seen[client_id] = time.time()
+
+    def _presence(self, client_id: str, *, connected: bool) -> dict[str, Any]:
+        """Describe when a client was last seen and whether it looks asleep rather than gone.
+
+        A client that has gone away and come back before is taken to be a
+        battery device on a sleep cycle, for as long as it is not much later
+        than its last cycle.
+        """
+        last_seen = self._last_seen.get(client_id)
+        wake_interval = self._wake_interval.get(client_id)
+        sleeping = (
+            not connected
+            and last_seen is not None
+            and wake_interval is not None
+            and time.time() - last_seen <= wake_interval * 2 + _SLEEP_GRACE
+        )
+        return {
+            "last_seen": None if connected else last_seen,
+            "wake_interval": wake_interval,
+            "sleeping": sleeping,
+        }
 
     def unassign(self, client_id: str) -> None:
         """Remove explicit assignment; client falls back to default."""
@@ -262,6 +308,9 @@ class ClientAssignmentManager:
         self._preset_assignments.pop(client_id, None)
         self._client_last_url.pop(client_id, None)
         self._client_locked.pop(client_id, None)
+        self._client_names.pop(client_id, None)
+        self._last_seen.pop(client_id, None)
+        self._wake_interval.pop(client_id, None)
 
     def effective_endpoint_id(self, client_id: str) -> str | None:
         return self._assignments.get(client_id, self._default_endpoint_id)
@@ -364,8 +413,11 @@ class ClientAssignmentManager:
             else:
                 discovered_only.append(entry_dict)
 
-        # --- Tier 3: DB-only clients (had an assignment, not currently connected or in mDNS) ---
-        for db_client_id in self._assignments:
+        # --- Tier 3: clients we know but cannot see (not currently connected or in mDNS) ---
+        # Those with a stored assignment, plus any seen since startup: a sleeping
+        # frame on the default endpoint has no assignment and drops out of mDNS.
+        seen_only = [cid for cid in self._last_seen if cid not in self._assignments]
+        for db_client_id in [*self._assignments, *seen_only]:
             if db_client_id in connected_ids or db_client_id in mdns_client_ids:
                 continue  # already represented in tier 1 or 2
             eid = self.effective_endpoint_id(db_client_id)
@@ -383,7 +435,7 @@ class ClientAssignmentManager:
                     "endpoint_id": eid,
                     "endpoint_name": ep.name if ep else None,
                     "preset_id": self._preset_assignments.get(db_client_id),
-                    "explicit_assignment": True,
+                    "explicit_assignment": db_client_id in self._assignments,
                     "dither_algo": self.client_dither_algo(db_client_id),
                     "dither_palette": self.client_dither_palette(db_client_id),
                     "interval": self.client_interval(db_client_id),
@@ -394,6 +446,11 @@ class ClientAssignmentManager:
                 }
             )
 
+        for entry in connected:
+            entry.update(self._presence(entry["id"], connected=True))
+        for entry in offline_db + discovered_only:
+            entry.update(self._presence(entry["id"], connected=False))
+            entry["name"] = self._client_names.get(entry["id"], entry["name"])
         return connected + offline_db + discovered_only
 
     # ---- Lifecycle ----
@@ -468,66 +525,87 @@ class ClientAssignmentManager:
         # makes a client that reconnects due at once, so a frame waking from deep
         # sleep gets its image inside its short awake window.
         last_push: dict[str, tuple[Any, float]] = {}
-        while True:
-            try:
-                now = time.monotonic()
-                all_clients = [
-                    c
-                    for c in self._server.clients.values()
-                    if c.has_artwork
-                    and c.stream_started
-                    and self.effective_endpoint_id(c.client_id) == endpoint.endpoint_id
-                ]
-                # Determine which clients are due for a push.
-                due_clients = [
-                    c
-                    for c in all_clients
-                    if self._is_due(c, last_push.get(c.client_id), now)
-                ]
-                if due_clients:
-                    data = await endpoint.fetch_next()
-                    if not data:
-                        await asyncio.sleep(1)
-                        continue
-                    logger.info(
-                        "Endpoint %r: fetched %d bytes, pushing to %d client(s)",
+        # The image for the next push, fetched ahead of time so a waking frame
+        # does not spend its awake window waiting on the endpoint.
+        next_image: asyncio.Task[bytes] | None = None
+        wake = asyncio.Event()
+        self._feed_wake[endpoint.endpoint_id] = wake
+        try:
+            while True:
+                wake.clear()
+                try:
+                    now = time.monotonic()
+                    all_clients = [
+                        c
+                        for c in self._server.clients.values()
+                        if c.has_artwork
+                        and c.stream_started
+                        and self.effective_endpoint_id(c.client_id) == endpoint.endpoint_id
+                    ]
+                    # Determine which clients are due for a push.
+                    due_clients = [
+                        c
+                        for c in all_clients
+                        if self._is_due(c, last_push.get(c.client_id), now)
+                    ]
+                    if due_clients:
+                        fetch = next_image or asyncio.create_task(endpoint.fetch_next())
+                        next_image = None
+                        data = await fetch
+                        if not data:
+                            await asyncio.sleep(1)
+                            continue
+                        logger.info(
+                            "Endpoint %r: fetched %d bytes, pushing to %d client(s)",
+                            endpoint.name,
+                            len(data),
+                            len(due_clients),
+                        )
+                        results = await asyncio.gather(
+                            *(
+                                _push(
+                                    self._server,
+                                    c,
+                                    data,
+                                    self.client_dither_algo(c.client_id),
+                                    self.client_dither_palette(c.client_id),
+                                )
+                                for c in due_clients
+                            ),
+                            return_exceptions=True,
+                        )
+                        push_time = time.monotonic()
+                        for c, result in zip(due_clients, results, strict=False):
+                            if isinstance(result, Exception):
+                                logger.error(
+                                    "Failed to push to client %s", c.client_id, exc_info=result
+                                )
+                            else:
+                                last_push[c.client_id] = (c, push_time)
+                        next_image = asyncio.create_task(endpoint.fetch_next())
+                    elif all_clients:
+                        logger.debug(
+                            "Endpoint %r: no clients due yet, skipping fetch", endpoint.name
+                        )
+                    else:
+                        logger.debug(
+                            "Endpoint %r: no clients assigned, skipping fetch", endpoint.name
+                        )
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception(
+                        "Endpoint %r: error in feed loop, retrying in 1s",
                         endpoint.name,
-                        len(data),
-                        len(due_clients),
                     )
-                    results = await asyncio.gather(
-                        *(
-                            _push(
-                                self._server,
-                                c,
-                                data,
-                                self.client_dither_algo(c.client_id),
-                                self.client_dither_palette(c.client_id),
-                            )
-                            for c in due_clients
-                        ),
-                        return_exceptions=True,
-                    )
-                    push_time = time.monotonic()
-                    for c, result in zip(due_clients, results, strict=False):
-                        if isinstance(result, Exception):
-                            logger.error(
-                                "Failed to push to client %s", c.client_id, exc_info=result
-                            )
-                        else:
-                            last_push[c.client_id] = (c, push_time)
-                elif all_clients:
-                    logger.debug("Endpoint %r: no clients due yet, skipping fetch", endpoint.name)
-                else:
-                    logger.debug("Endpoint %r: no clients assigned, skipping fetch", endpoint.name)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.exception(
-                    "Endpoint %r: error in feed loop, retrying in 1s",
-                    endpoint.name,
-                )
-            await asyncio.sleep(1)
+                # Look again in a second, or as soon as a client connects.
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(wake.wait(), 1)
+        finally:
+            if next_image is not None:
+                next_image.cancel()
+            if self._feed_wake.get(endpoint.endpoint_id) is wake:
+                del self._feed_wake[endpoint.endpoint_id]
 
     def _is_due(self, client: Any, last: tuple[Any, float] | None, now: float) -> bool:
         """Return True if `client` is new on this connection or its interval is up."""

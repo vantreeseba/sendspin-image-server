@@ -273,6 +273,12 @@ class EndpointRegistry:
     def ensure_client(self, client_id: str, name: str, url: str | None = None) -> None:
         self._assignments.ensure_client(client_id, name, url)
 
+    def client_connected(self, client_id: str) -> None:
+        self._assignments.client_connected(client_id)
+
+    def client_disconnected(self, client_id: str) -> None:
+        self._assignments.client_disconnected(client_id)
+
     def set_client_locked(self, client_id: str, *, locked: bool) -> None:
         self._assignments.set_client_locked(client_id, locked=locked)
 

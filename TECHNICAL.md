@@ -147,6 +147,16 @@ The cap is short on purpose: a battery device that deep-sleeps is only reachable
 
 Each endpoint feed loop remembers which connection it last pushed to, per client. A client that reconnects is a new connection, so it is due immediately rather than after the rest of its interval. Together with the fast reconnect above, a frame waking from deep sleep gets its next image within a few seconds.
 
+Two more things keep that window short. The feed loop is woken the moment a client finishes its handshake, instead of noticing it on its next one-second pass. And after every push it fetches the following image in the background, so the next client that is due gets an image that is already in memory rather than waiting on Immich or Home Assistant.
+
+### Client-initiated connections
+
+A client may also dial the server itself (`ws://<server>:8927/sendspin`), which skips mDNS discovery altogether. If the server dials the same client at the same time, the client keeps one connection and closes the other; the server tracks every live connection per client and keeps serving whichever one survives.
+
+### Sleeping clients
+
+The server notes when each client's last connection closed, and how long it was away the last time it came back. A disconnected client that has come back before is reported as `sleeping` (with `last_seen` and `wake_interval`) until it is more than twice its last cycle plus a minute overdue, after which it is plain offline. This is held in memory only, so it starts fresh after a server restart.
+
 ### `goodbye` reason `another_server`
 
 If the client sends `client/goodbye` with `reason: "another_server"`, the loop exits without retrying. This prevents competing with a different Sendspin server that the display has chosen to connect to.
