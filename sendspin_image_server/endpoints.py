@@ -256,11 +256,7 @@ class HomeAssistantEndpoint(ImageEndpoint):
     # WebSocket helpers
     # ------------------------------------------------------------------
 
-    async def _ws_browse(
-        self,
-        media_content_id: str,
-        media_content_type: str = "media-source",
-    ) -> dict[str, Any]:
+    async def _ws_browse(self, media_content_id: str) -> dict[str, Any]:
         """Open a short-lived WebSocket to HA, authenticate, and browse media."""
         import aiohttp
 
@@ -280,12 +276,11 @@ class HomeAssistantEndpoint(ImageEndpoint):
             if auth_resp.get("type") != "auth_ok":
                 raise RuntimeError(f"HA auth failed: {auth_resp.get('message', auth_resp)}")
 
-            # browse_media
+            # browse_media — the media source command, which needs no media player entity
             await ws.send_json({
                 "id": msg_id,
-                "type": "media_player/browse_media",
+                "type": "media_source/browse_media",
                 "media_content_id": media_content_id,
-                "media_content_type": media_content_type,
             })
             result = await ws.receive_json()
             if not result.get("success"):
@@ -323,7 +318,8 @@ class HomeAssistantEndpoint(ImageEndpoint):
     async def _collect_images(self, node: dict[str, Any], depth: int = 0) -> list[dict[str, Any]]:
         """Recursively walk the browse tree and collect image leaf nodes."""
         images: list[dict[str, Any]] = []
-        content_type: str = node.get("media_content_type", "")
+        # HA sends null for folders that have no content type of their own.
+        content_type: str = node.get("media_content_type") or ""
         can_expand: bool = bool(node.get("can_expand", False))
         can_play: bool = bool(node.get("can_play", False))
         cid: str = node.get("media_content_id", "")
@@ -339,7 +335,7 @@ class HomeAssistantEndpoint(ImageEndpoint):
 
         if can_expand and depth < 6:
             try:
-                child_node = await self._ws_browse(cid, content_type)
+                child_node = await self._ws_browse(cid)
                 for child in child_node.get("children", []):
                     images.extend(await self._collect_images(child, depth + 1))
             except Exception:
