@@ -154,6 +154,26 @@ class EndpointRegistry:
             )
         return True
 
+    async def update_endpoint(
+        self, endpoint_id: str, changes: dict[str, Any]
+    ) -> ImageEndpoint | None:
+        """Edit an endpoint in place, so its id, assignments and running task carry over."""
+        endpoint = self._endpoints.get(endpoint_id)
+        if endpoint is None:
+            return None
+        endpoint.update(changes)
+        if self._assignments.db is not None:
+            spawn(
+                self._assignments.db.save_endpoint(
+                    endpoint.endpoint_id,
+                    endpoint.kind,
+                    endpoint.name,
+                    endpoint_to_config(endpoint),
+                ),
+                f"save_endpoint({endpoint.endpoint_id})",
+            )
+        return endpoint
+
     def get_endpoint(self, endpoint_id: str) -> ImageEndpoint | None:
         return self._endpoints.get(endpoint_id)
 
