@@ -412,7 +412,12 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
         }
       />
 
-      <ClientDebugPreviewDialog clientId={client.id} open={debugOpen} onOpenChange={setDebugOpen} />
+      <ClientDebugPreviewDialog
+        clientId={client.id}
+        sentAt={client.last_sent_at ?? null}
+        open={debugOpen}
+        onOpenChange={setDebugOpen}
+      />
     </>
   );
 }

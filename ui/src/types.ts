@@ -65,6 +65,7 @@ export interface Client {
   last_seen?: number | null; // epoch seconds of the last disconnect; null while connected
   wake_interval?: number | null; // seconds it was last away before coming back
   sleeping?: boolean; // offline, but on a sleep cycle and expected back
+  last_sent_at?: number | null; // epoch seconds of the last image sent to it; null if none yet
 }
 
 export interface Endpoint {

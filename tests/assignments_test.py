@@ -29,6 +29,7 @@ def _server(clients=None, discovered=None):
     srv = MagicMock()
     srv.clients = clients or {}
     srv.get_discovered_urls.return_value = discovered or []
+    srv.last_image_sent_at.return_value = None
     return srv
 
 
@@ -357,6 +358,19 @@ class TestClientInfo:
         mgr.set_client_dither("c1", "floyd-steinberg")
         result = mgr.client_info()
         assert result[0]["dither_algo"] == "floyd-steinberg"
+
+
+    def test_client_info_says_when_the_last_image_was_sent(self):
+        cs = ClientState(
+            client_id="c1",
+            name="Frame",
+            active_roles=[ROLE_ARTWORK],
+            artwork=_artwork_role(),
+        )
+        srv = _server(clients={"c1": cs})
+        srv.last_image_sent_at.return_value = 1700000000.0
+        mgr = _manager(server=srv)
+        assert mgr.client_info()[0]["last_sent_at"] == 1700000000.0
 
 
 # ---------------------------------------------------------------------------

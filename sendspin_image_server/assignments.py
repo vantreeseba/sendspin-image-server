@@ -256,7 +256,7 @@ class ClientAssignmentManager:
 
         A client that has gone away and come back before is taken to be a
         battery device on a sleep cycle, for as long as it is not much later
-        than its last cycle.
+        than its last cycle. Also says when it was last sent an image.
         """
         last_seen = self._last_seen.get(client_id)
         wake_interval = self._wake_interval.get(client_id)
@@ -270,6 +270,7 @@ class ClientAssignmentManager:
             "last_seen": None if connected else last_seen,
             "wake_interval": wake_interval,
             "sleeping": sleeping,
+            "last_sent_at": self._server.last_image_sent_at(client_id),
         }
 
     def unassign(self, client_id: str) -> None:

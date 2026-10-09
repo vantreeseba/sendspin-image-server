@@ -3,9 +3,12 @@ import { getDebugImage } from '@/api';
 import { DialogLayout } from '@/components/dialog-layout';
 import { Alert } from '@/components/ui/alert';
 import { Spinner } from '@/components/ui/spinner';
+import { formatAgo } from '@/lib/format';
 
 interface Props {
   clientId: string;
+  /** Epoch seconds of the last image sent to the client, or null if none yet. */
+  sentAt: number | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
@@ -20,9 +23,10 @@ type PreviewState =
  *
  * Mounted with a `key` so that changing client (or reopening the dialog) throws
  * this away and starts from `loading` again. That keeps the effect purely
- * asynchronous — there is no state to reset synchronously on the way in.
+ * asynchronous — there is no state to reset synchronously on the way in. The
+ * key carries `sentAt` too, so an open dialog follows what the client is sent.
  */
-function DebugPreview({ clientId }: { clientId: string }) {
+function DebugPreview({ clientId, sentAt }: { clientId: string; sentAt: number | null }) {
   const [state, setState] = useState<PreviewState>({ status: 'loading' });
 
   useEffect(() => {
@@ -72,24 +76,33 @@ function DebugPreview({ clientId }: { clientId: string }) {
   }
 
   return (
-    <div className="flex items-center justify-center rounded-lg border border-foreground/10 bg-secondary p-4">
+    <div className="flex flex-col items-center gap-3 rounded-lg border border-foreground/10 bg-secondary p-4">
       <img
         src={state.url}
         alt="Client preview"
         className="max-h-[60vh] w-auto rounded-md object-contain"
       />
+      {sentAt != null && (
+        <p className="text-sm text-foreground/60">
+          Sent {formatAgo(sentAt * 1000)} at {new Date(sentAt * 1000).toLocaleTimeString()}
+        </p>
+      )}
     </div>
   );
 }
 
-export function ClientDebugPreviewDialog({ clientId, open, onOpenChange }: Props) {
+export function ClientDebugPreviewDialog({ clientId, sentAt, open, onOpenChange }: Props) {
   return (
     <DialogLayout
       open={open}
       onOpenChange={onOpenChange}
       title={`Preview — Client ${clientId.split('-').at(-1) ?? clientId.slice(-6)}`}
-      description="Image currently being sent to this client"
-      contentSlot={open ? <DebugPreview key={clientId} clientId={clientId} /> : null}
+      description="The last image sent to this client"
+      contentSlot={
+        open ? (
+          <DebugPreview key={`${clientId}:${sentAt}`} clientId={clientId} sentAt={sentAt} />
+        ) : null
+      }
     />
   );
 }

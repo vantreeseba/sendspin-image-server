@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from pathlib import Path
@@ -156,6 +157,8 @@ class SendspinImageServer:
         self._tasks: set[asyncio.Task[None]] = set()
         self._last_image: dict[str | None, bytes | None] = {None: None}
         self._last_image_channel: int = 0
+        # client_id → when its last image was sent (epoch seconds)
+        self._last_image_at: dict[str, float] = {}
         # url → url: all URLs we are tracking (discovered via mDNS or connect_to_client)
         self._discovered_clients: dict[str, str] = {}
         # url → mDNS instance name (e.g. "photo-frame-2")
@@ -184,6 +187,11 @@ class SendspinImageServer:
     def record_last_image(self, client_id: str, image_bytes: bytes) -> None:
         """Remember the last image pushed to `client_id` for the debug endpoints."""
         self._last_image[client_id] = image_bytes
+        self._last_image_at[client_id] = time.time()
+
+    def last_image_sent_at(self, client_id: str) -> float | None:
+        """Return when the last image was pushed to `client_id` (epoch seconds), or None."""
+        return self._last_image_at.get(client_id)
 
     def client_id_for_url(self, url: str) -> str | None:
         """Return the client_id learned for an outbound `url`, or None if not handshaked."""
@@ -358,7 +366,7 @@ class SendspinImageServer:
             if isinstance(result, BaseException):
                 logger.warning("Failed to push image to %s: %s", client.client_id, result)
             elif result is not None:
-                self._last_image[client.client_id] = result
+                self.record_last_image(client.client_id, result)
 
     # ------------------------------------------------------------------
     # aiosendspin events
