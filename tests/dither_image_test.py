@@ -1,4 +1,4 @@
-"""Integration tests for dithering applied to images/test.jpg.
+"""Integration tests for dithering applied to a display-sized stand-in photograph.
 
 These tests verify that the full dithering pipeline produces output that
 renders correctly on the Waveshare Spectra E6 display via ESPHome.
@@ -12,11 +12,10 @@ wrong ink — which is why these tests exist.
 from __future__ import annotations
 
 import io
-import pathlib
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
-from PIL import Image
 
 from sendspin_image_server.dither import (
     E6_PALETTE_RGB,
@@ -24,12 +23,12 @@ from sendspin_image_server.dither import (
     dither_to_pil,
 )
 
+if TYPE_CHECKING:
+    from PIL import Image
+
 # ---------------------------------------------------------------------------
 # Paths / constants
 # ---------------------------------------------------------------------------
-
-_IMAGES_DIR = pathlib.Path(__file__).parent.parent / "images"
-TEST_IMAGE = _IMAGES_DIR / "test.jpg"
 
 # PhotoPainter display resolution
 DISPLAY_W, DISPLAY_H = 480, 800
@@ -77,20 +76,12 @@ PALETTE_INK: dict[tuple[int, int, int], int] = {
 # ---------------------------------------------------------------------------
 
 
-def _load_as_jpeg(path: pathlib.Path, width: int, height: int) -> bytes:
-    """Open an image, resize to (width, height), return as JPEG bytes."""
-    img = Image.open(path).convert("RGB")
-    img = img.resize((width, height), Image.Resampling.LANCZOS)
-    buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=95)
-    return buf.getvalue()
-
-
 @pytest.fixture(scope="module")
-def source_jpeg() -> bytes:
-    if not TEST_IMAGE.exists():
-        pytest.skip(f"Test image missing: {TEST_IMAGE}")
-    return _load_as_jpeg(TEST_IMAGE, DISPLAY_W, DISPLAY_H)
+def source_jpeg(photo: Image.Image) -> bytes:
+    assert photo.size == (DISPLAY_W, DISPLAY_H)
+    buf = io.BytesIO()
+    photo.save(buf, format="JPEG", quality=95)
+    return buf.getvalue()
 
 
 @pytest.fixture(scope="module")
@@ -138,7 +129,7 @@ class TestPaletteColors:
 
 
 class TestDitheredImage:
-    """Tests that apply dithering to test.jpg and inspect the pixel output."""
+    """Tests that apply dithering to the stand-in photograph and inspect the pixel output."""
 
     # ---- pixel set correctness ----
 

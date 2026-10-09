@@ -5,6 +5,22 @@ import pytest
 from PIL import Image
 
 
+@pytest.fixture(scope="session")
+def photo() -> Image.Image:
+    """Return a 480x800 stand-in for a photograph.
+
+    Every hue runs left to right and dark to light runs top to bottom, with a
+    grey ramp along the bottom quarter, so each ink of a colour palette is needed.
+    """
+    width, height = 480, 800
+    hue = np.tile(np.linspace(0, 255, width, dtype=np.uint8), (height, 1))
+    value = np.tile(np.linspace(0, 255, height, dtype=np.uint8)[:, None], (1, width))
+    saturation = np.full((height, width), 255, dtype=np.uint8)
+    saturation[height * 3 // 4 :] = 0
+    value[height * 3 // 4 :] = hue[height * 3 // 4 :]
+    return Image.fromarray(np.stack([hue, saturation, value], -1), "HSV").convert("RGB")
+
+
 @pytest.fixture
 def solid_jpeg() -> bytes:
     """Return bytes for a 100x100 solid gray (128,128,128) JPEG image."""
