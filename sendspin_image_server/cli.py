@@ -47,6 +47,19 @@ logger = logging.getLogger(__name__)
 
 # Built-in local folder endpoint — always present, cannot be deleted via REST.
 _BUILTIN_LOCAL_ENDPOINT_ID = "builtin-local"
+
+# What PUT /api/endpoints/{id} may change, by kind.  A secret is never sent to the browser,
+# so one left out or left blank keeps the stored value.
+_ENDPOINT_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
+    "local": ("path",),
+    "immich": ("base_url", "album_id"),
+    "homeassistant": ("base_url",),
+}
+_ENDPOINT_SECRET_FIELDS: dict[str, tuple[str, ...]] = {
+    "immich": ("api_key",),
+    "homeassistant": ("token",),
+}
+_DEFAULT_HA_MEDIA_CONTENT_ID = "media-source://media_source"
 _BUILTIN_LOCAL_PATH = pathlib.Path("/app/images")
 
 
@@ -281,7 +294,7 @@ async def run(  # noqa: C901, PLR0915
         elif kind == "homeassistant":
             base_url = body.get("base_url", "").strip()
             token = body.get("token", "").strip()
-            media_content_id = body.get("media_content_id", "media-source://media_source").strip()
+            media_content_id = body.get("media_content_id", _DEFAULT_HA_MEDIA_CONTENT_ID).strip()
             if not (base_url and token):
                 return web.Response(
                     status=400, text="'base_url' and 'token' are required for kind=homeassistant"
@@ -308,6 +321,50 @@ async def run(  # noqa: C901, PLR0915
         d["builtin"] = False
         d["is_default"] = ep.endpoint_id == registry.default_endpoint_id
         return web.Response(status=201, content_type="application/json", text=json.dumps(d))
+
+    async def api_update_endpoint(request: web.Request) -> web.Response:
+        """PUT /api/endpoints/{id}  body: any of {name, path, base_url, album_id, ...}."""
+        endpoint_id = request.match_info["id"]
+        if endpoint_id == _BUILTIN_LOCAL_ENDPOINT_ID:
+            return web.Response(status=403, text="Cannot edit built-in endpoint")
+        ep = registry.get_endpoint(endpoint_id)
+        if ep is None:
+            return web.Response(status=404, text=f"Endpoint {endpoint_id!r} not found")
+
+        try:
+            body = await request.json()
+        except ValueError:
+            return web.Response(status=400, text="Invalid JSON")
+
+        if "kind" in body and body["kind"] != ep.kind:
+            return web.Response(status=400, text="'kind' cannot be changed")
+
+        changes: dict[str, Any] = {}
+        for field in ("name", *_ENDPOINT_REQUIRED_FIELDS.get(ep.kind, ())):
+            if field not in body:
+                continue
+            value = str(body[field] or "").strip()
+            if not value:
+                return web.Response(status=400, text=f"'{field}' is required")
+            changes[field] = value
+        for field in _ENDPOINT_SECRET_FIELDS.get(ep.kind, ()):
+            value = str(body.get(field) or "").strip()
+            if value:
+                changes[field] = value
+        if ep.kind == "homeassistant" and "media_content_id" in body:
+            changes["media_content_id"] = (
+                str(body["media_content_id"] or "").strip() or _DEFAULT_HA_MEDIA_CONTENT_ID
+            )
+        if "path" in changes and not await asyncio.to_thread(
+            pathlib.Path(changes["path"]).is_dir
+        ):
+            return web.Response(status=400, text=f"Directory not found: {changes['path']}")
+
+        await registry.update_endpoint(endpoint_id, changes)
+        d = ep.to_dict()
+        d["builtin"] = False
+        d["is_default"] = ep.endpoint_id == registry.default_endpoint_id
+        return web.Response(content_type="application/json", text=json.dumps(d))
 
     async def api_delete_endpoint(request: web.Request) -> web.Response:
         """DELETE /api/endpoints/{id}."""
@@ -660,6 +717,7 @@ async def run(  # noqa: C901, PLR0915
     app.router.add_get("/api/clients", api_get_clients)
     app.router.add_get("/api/endpoints", api_get_endpoints)
     app.router.add_post("/api/endpoints", api_add_endpoint)
+    app.router.add_put("/api/endpoints/{id}", api_update_endpoint)
     app.router.add_delete("/api/endpoints/{id}", api_delete_endpoint)
     app.router.add_get("/api/device-presets", api_get_device_presets)
     app.router.add_post("/api/device-presets", api_add_device_preset)

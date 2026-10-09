@@ -1,12 +1,40 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.5.11/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
   "vcs": {
     "enabled": true,
     "clientKind": "git",
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!dist", "!**/components/ui"]
+    "includes": [
+      "**",
+      "!dist",
+      "!**/components/ui",
+      "!src/components/action-button.tsx",
+      "!src/components/app-form.tsx",
+      "!src/components/card-layout.tsx",
+      "!src/components/confirm-button.tsx",
+      "!src/components/description-list.tsx",
+      "!src/components/dialog-layout.tsx",
+      "!src/components/field-row.tsx",
+      "!src/components/form-field.tsx",
+      "!src/components/header-content-footer.tsx",
+      "!src/components/option-select.tsx",
+      "!src/components/page-header.tsx",
+      "!src/components/page-layout.tsx",
+      "!src/components/page.tsx",
+      "!src/components/password-field.tsx",
+      "!src/components/password-input.tsx",
+      "!src/components/query-state.tsx",
+      "!src/components/section.tsx",
+      "!src/lib/color.ts",
+      "!src/lib/error-message.ts",
+      "!src/lib/form-binding.ts",
+      "!src/lib/format.ts",
+      "!src/lib/utils.ts",
+      "!cubeui-reset.css",
+      "!cubeui-tokens.css"
+    ]
   },
   "formatter": {
     "enabled": true,

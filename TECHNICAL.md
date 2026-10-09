@@ -309,6 +309,7 @@ All JSON request bodies must have `Content-Type: application/json`. Responses ar
 |----------|-------------------------|------------------------------------------------------------------------|-------------|-------------|
 | `GET`    | `/api/endpoints`        | —                                                                      | 200 JSON array | List all configured image providers |
 | `POST`   | `/api/endpoints`        | `{"kind": "local\|immich\|homeassistant", "name": "...", ...}`         | 201 JSON    | Add a new image provider |
+| `PUT`    | `/api/endpoints/{id}`   | Any of `name` and the kind's own fields                                | 200 JSON    | Edit a provider in place. The kind cannot change, and a blank or missing `api_key`/`token` keeps the stored one (returns 403 for the built-in local provider) |
 | `DELETE` | `/api/endpoints/{id}`   | —                                                                      | 204         | Remove a provider (returns 403 for the built-in local provider) |
 
 **`POST /api/endpoints` body fields by kind:**

@@ -366,13 +366,13 @@ class ClientAssignmentManager:
 
         # --- Tier 2: mDNS-discovered URLs (may or may not have a known client_id) ---
         mdns_client_ids: set[str] = set()
-        for entry in self._server.get_discovered_urls():
-            raw_url = entry["url"]
+        for discovered in self._server.get_discovered_urls():
+            raw_url = discovered["url"]
             if raw_url is None:
                 continue  # malformed entry — guard clause
             url: str = raw_url
-            known_client_id: str | None = entry["client_id"]
-            mdns_name: str | None = entry.get("mdns_name")
+            known_client_id: str | None = discovered["client_id"]
+            mdns_name: str | None = discovered.get("mdns_name")
 
             # Already connected — skip (tier 1 owns it).
             if known_client_id is not None and known_client_id in connected_ids:

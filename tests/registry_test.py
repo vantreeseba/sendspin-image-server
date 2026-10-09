@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from sendspin_image_server.endpoints import LocalFolderEndpoint
+from sendspin_image_server.endpoints import ImmichEndpoint, LocalFolderEndpoint
 from sendspin_image_server.registry import DevicePreset, EndpointRegistry
 
 # ---------------------------------------------------------------------------
@@ -120,6 +120,42 @@ class TestEndpointCRUD:
         assert empty_registry.default_endpoint_id == "ep1"
         await empty_registry.remove_endpoint("ep1")
         assert empty_registry.default_endpoint_id == "ep2"
+
+    async def test_update_endpoint_edits_in_place(self, registry_with_ep, tmp_path):
+        reg, ep = registry_with_ep
+        updated = await reg.update_endpoint(
+            ep.endpoint_id, {"name": "Renamed", "path": str(tmp_path)}
+        )
+        assert updated is ep
+        assert ep.name == "Renamed"
+        assert ep.path == tmp_path
+        assert reg.get_endpoint(ep.endpoint_id) is ep
+
+    async def test_update_endpoint_keeps_default_and_assignments(self, registry_with_ep):
+        reg, ep = registry_with_ep
+        reg.assign("client-1", ep.endpoint_id)
+        await reg.update_endpoint(ep.endpoint_id, {"name": "Renamed"})
+        assert reg.default_endpoint_id == ep.endpoint_id
+        assert reg.effective_endpoint_id("client-1") == ep.endpoint_id
+
+    async def test_update_unknown_endpoint_returns_none(self, empty_registry):
+        assert await empty_registry.update_endpoint("ghost", {"name": "x"}) is None
+
+    async def test_update_immich_keeps_secret_and_restarts_album(self, empty_registry):
+        ep = ImmichEndpoint(
+            name="Album", base_url="https://a.example", album_id="one", api_key="secret"
+        )
+        ep._index = 3
+        ep._assets = [{"id": "x"}]
+        await empty_registry.add_endpoint(ep, _persist=False)
+        await empty_registry.update_endpoint(
+            ep.endpoint_id, {"base_url": "https://b.example/", "album_id": "two"}
+        )
+        assert ep.base_url == "https://b.example"
+        assert ep.album_id == "two"
+        assert ep.api_key == "secret"
+        assert ep._index == 0
+        assert ep._assets == []
 
     async def test_default_endpoint_id_setter_raises_for_unknown(self, empty_registry):
         with pytest.raises(ValueError, match="ghost"):

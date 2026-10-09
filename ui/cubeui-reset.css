@@ -1,0 +1,138 @@
+/* biome-ignore-all lint/complexity/noImportantStyles: the pointer-events rules copy react-native-web's, !important included, on purpose */
+
+/*
+ * The reset a compiled component needs, and the reason the compiler cannot be only a rename.
+ *
+ * React Native source legitimately omits classes that the DOM then needs, because Yoga supplies
+ * the defaults and CSS does not. `flex-direction` is the clearest case: a `<View>` stacks its
+ * children vertically with nothing said, so no RN author ever writes `flex-col` — and the same
+ * markup as a `<div>` is `display: block`, where the children stack for a different reason and
+ * every `flex-1`, `items-center` and `gap-*` beside them stops meaning what it meant. Emitting
+ * `<div class="rounded-lg border">` and calling it compiled would produce a tree that looks
+ * nearly right and is wrong everywhere flex was load-bearing.
+ *
+ * On web today react-native-web closes that gap with a per-component base class of its own. A
+ * compiled component has no react-native-web, so this stylesheet is what replaces it. The values
+ * below are lifted from `react-native-web/dist/cjs/exports/{View,Text}/index.js` rather than
+ * remembered, because the whole point is that the compiled tree lays out the way the RN one does.
+ *
+ * `@layer base` on purpose. The tokens stylesheet imports Tailwind's utilities *unlayered* — it
+ * has to, because react-native-web's own base class is unlayered and would otherwise beat them —
+ * so anything layered loses to a utility. That is exactly the precedence a reset wants: `p-6`
+ * beats `padding: 0` here without the specificity fight that the react-native-web cascade needs a
+ * comment to explain.
+ */
+
+@layer base {
+  /*
+   * A `<View>`. Four of these are what make RN-authored markup lay out at all: `display: flex`
+   * and `flex-direction: column` because that is Yoga's default and nobody writes it, `flex-shrink:
+   * 0` and `flex-basis: auto` because CSS flex items shrink below their content and Yoga's do not.
+   *
+   * The border is longhand on purpose. react-native-web writes `border: 0 solid black`, and the
+   * shorthand resets the colour as well as the width — to `currentColor` once the `black` is
+   * dropped. A DOM app sets its default border colour the way shadcn does, `* { @apply
+   * border-border }` in this same layer, and a class outranks `*`: a bare `border` passed through
+   * `className` drew in the text colour here and in `--border` on the `<div>` beside it (#206).
+   * The colour is the same case as the `color` a `<Text>` declines below — it emulates React
+   * Native, where nothing inherits — so it is left to the page.
+   */
+  .cube-rn-view {
+    align-content: flex-start;
+    align-items: stretch;
+    background-color: transparent;
+    border-style: solid;
+    border-width: 0;
+    box-sizing: border-box;
+    display: flex;
+    flex-basis: auto;
+    flex-direction: column;
+    flex-shrink: 0;
+    list-style: none;
+    margin: 0;
+    min-height: 0;
+    min-width: 0;
+    padding: 0;
+    position: relative;
+    text-decoration: none;
+    z-index: 0;
+  }
+
+  /*
+   * A `<Text>`. react-native-web also pins `color: black` and `font: 14px System` here, and this
+   * deliberately does not: those emulate React Native, where nothing inherits and every `<Text>`
+   * starts from the same place. On the DOM inheritance is the correct behaviour and the one a
+   * consumer's own page styles expect — pinning them would make a compiled component the only
+   * thing on the page that ignores the font it was dropped into. `white-space: pre-wrap` stays,
+   * because RN treats the newlines in a string literal as text and HTML does not.
+   * The border is longhand for the reason the view's is.
+   */
+  .cube-rn-text {
+    background-color: transparent;
+    border-style: solid;
+    border-width: 0;
+    box-sizing: border-box;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    position: relative;
+    text-decoration: none;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+
+  /*
+   * A `<Pressable>`. It is a `<button>`, which arrives with a user-agent look — a border, a grey
+   * background, centred text, the platform font — that no `<View>` has. Everything here is
+   * undoing that, on top of the view reset the element also carries.
+   */
+  .cube-rn-pressable {
+    appearance: none;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+    text-align: inherit;
+  }
+}
+
+/*
+ * `pointerEvents`, which is a prop on native and a style on the web, and whose two "box" values
+ * describe a view and its children disagreeing — something CSS says with two rules, not one value.
+ *
+ * Lifted rule for rule from `react-native-web/dist/cjs/exports/StyleSheet/compiler/index.js`,
+ * including the `!important`, which is the one place this stylesheet copies react-native-web
+ * rather than improving on it. The reason it is there: `pointerEvents` is written as a prop
+ * precisely when the author needs it to win, and a utility class in the same `className` would
+ * otherwise beat it. That is also why these four sit outside `@layer base` while everything above
+ * sits inside it — a reset should lose to a utility, and this is not a reset.
+ */
+.cube-rn-pe-auto {
+  pointer-events: auto !important;
+}
+
+.cube-rn-pe-none {
+  pointer-events: none !important;
+}
+
+.cube-rn-pe-none > * {
+  pointer-events: none;
+}
+
+/* Transparent to the pointer itself, while its children are not — a toast viewport, a tooltip
+ * layer, anything that covers the screen to position something small. */
+.cube-rn-pe-box-none {
+  pointer-events: none !important;
+}
+
+.cube-rn-pe-box-none > * {
+  pointer-events: auto;
+}
+
+/* The inverse: the view takes the pointer and its children do not. */
+.cube-rn-pe-box-only {
+  pointer-events: auto !important;
+}
+
+.cube-rn-pe-box-only > * {
+  pointer-events: none;
+}

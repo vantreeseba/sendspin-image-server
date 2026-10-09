@@ -50,6 +50,11 @@ class ImageEndpoint(ABC):
     async def fetch_next(self) -> bytes:
         """Return raw image bytes for the next image in this source."""
 
+    def update(self, changes: dict[str, Any]) -> None:
+        """Apply edited settings in place.  Keys this kind does not have are ignored."""
+        if "name" in changes:
+            self.name = changes["name"]
+
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a JSON-safe dict for the REST API."""
         return {
@@ -99,6 +104,13 @@ class LocalFolderEndpoint(ImageEndpoint):
         data = self._files[self._index].read_bytes()
         self._index = (self._index + 1) % len(self._files)
         return data
+
+    def update(self, changes: dict[str, Any]) -> None:
+        super().update(changes)
+        if "path" in changes:
+            self.path = pathlib.Path(changes["path"])
+            self._index = 0
+            self._files = []
 
     def to_dict(self) -> dict[str, Any]:
         return {**super().to_dict(), "path": str(self.path)}
@@ -171,6 +183,19 @@ class ImmichEndpoint(ImageEndpoint):
         logger.info("Immich fetch_next: asset %r → %d bytes (EXIF-corrected)", asset_id, len(data))
         self._index = (self._index + 1) % len(self._assets)
         return data
+
+    def update(self, changes: dict[str, Any]) -> None:
+        super().update(changes)
+        if "base_url" in changes:
+            self.base_url = changes["base_url"].rstrip("/")
+        if "album_id" in changes:
+            self.album_id = changes["album_id"]
+        if "api_key" in changes:
+            self.api_key = changes["api_key"]
+        if changes.keys() & {"base_url", "album_id", "api_key"}:
+            # Start over, so the next fetch reads the album the new settings point at.
+            self._index = 0
+            self._assets = []
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -364,6 +389,19 @@ class HomeAssistantEndpoint(ImageEndpoint):
         ):
             resp.raise_for_status()
             return await resp.read()
+
+    def update(self, changes: dict[str, Any]) -> None:
+        super().update(changes)
+        if "base_url" in changes:
+            self.base_url = changes["base_url"].rstrip("/")
+        if "token" in changes:
+            self.token = changes["token"]
+        if "media_content_id" in changes:
+            self.media_content_id = changes["media_content_id"]
+        if changes.keys() & {"base_url", "token", "media_content_id"}:
+            # Start over, so the next fetch browses the tree the new settings point at.
+            self._index = 0
+            self._items = []
 
     def to_dict(self) -> dict[str, Any]:
         return {
