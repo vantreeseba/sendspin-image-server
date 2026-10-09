@@ -2,6 +2,47 @@
 
 <!-- version list -->
 
+## v2.0.0 (2026-10-09)
+
+### Bug Fixes
+
+- **registry**: Stop reusing a loop variable with a different type
+  ([`d623eb8`](https://github.com/vantreeseba/sendspin-image-server/commit/d623eb88634f0f736c758e256ead14d9f56e0ce8))
+
+- **server**: Serve clients waking from deep sleep promptly
+  ([`8c9c22d`](https://github.com/vantreeseba/sendspin-image-server/commit/8c9c22d5a2cdcf6875f6efbf902fb61857d09ec7))
+
+### Features
+
+- **dither**: Add six-colour e6 palette and rename the old one to e7
+  ([`2126196`](https://github.com/vantreeseba/sendspin-image-server/commit/2126196edecc838e075bcdcf7c3a5deccc969769))
+
+- **server**: Add a route to edit an image provider
+  ([`7767fc3`](https://github.com/vantreeseba/sendspin-image-server/commit/7767fc333a1a6f3831f83fd792c71f90321d514f))
+
+- **server**: Push on connect, prefetch images and track sleeping clients
+  ([`01a0a57`](https://github.com/vantreeseba/sendspin-image-server/commit/01a0a574d0ee39554b07ab864e1d3cb17180b003))
+
+- **server**: Speak sendspin 1.0.0-rc1 through aiosendspin
+  ([`1268c35`](https://github.com/vantreeseba/sendspin-image-server/commit/1268c35bb107b4eb77c11b32227937127196981e))
+
+- **ui**: Add an edit dialog for image providers
+  ([`8753f39`](https://github.com/vantreeseba/sendspin-image-server/commit/8753f39a03c8a4643e92fe5e988afec527481982))
+
+- **ui**: Convert the web ui to cubeui
+  ([`ee31ef9`](https://github.com/vantreeseba/sendspin-image-server/commit/ee31ef9a8ac27ae6912ff59c2115b968370a02f9))
+
+- **ui**: Show sleeping clients with last seen and wake interval
+  ([`38e139c`](https://github.com/vantreeseba/sendspin-image-server/commit/38e139c346faae69566cd6b46cd7897b2c93380c))
+
+### Breaking Changes
+
+- **server**: The server id is now the public key of an identity kept in DATA_DIR, so --server-id is
+  ignored. The custom "e6-dithered" channel format is no longer accepted in a client hello; set
+  dithering per client instead. ArtworkChannel.media_width/media_height are now width/height, and
+  reconnect backoff is capped at 300s instead of 15s.
+
+
 ## v1.22.1 (2026-08-31)
 
 ### Bug Fixes
