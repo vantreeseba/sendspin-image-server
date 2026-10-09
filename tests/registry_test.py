@@ -25,6 +25,7 @@ def _mock_server():
     srv = MagicMock()
     srv.clients = {}
     srv.get_discovered_urls.return_value = []
+    srv.last_image_sent_at.return_value = None
     return srv
 
 

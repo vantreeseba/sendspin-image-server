@@ -29,6 +29,7 @@ def _server(clients=None, discovered=None):
     srv = MagicMock()
     srv.clients = clients or {}
     srv.get_discovered_urls.return_value = discovered or []
+    srv.last_image_sent_at.return_value = None
     return srv
 
 
@@ -359,6 +360,19 @@ class TestClientInfo:
         assert result[0]["dither_algo"] == "floyd-steinberg"
 
 
+    def test_client_info_says_when_the_last_image_was_sent(self):
+        cs = ClientState(
+            client_id="c1",
+            name="Frame",
+            active_roles=[ROLE_ARTWORK],
+            artwork=_artwork_role(),
+        )
+        srv = _server(clients={"c1": cs})
+        srv.last_image_sent_at.return_value = 1700000000.0
+        mgr = _manager(server=srv)
+        assert mgr.client_info()[0]["last_sent_at"] == 1700000000.0
+
+
 # ---------------------------------------------------------------------------
 # Feed loop
 # ---------------------------------------------------------------------------
@@ -414,6 +428,22 @@ class TestFeedLoop:
         srv = _server(clients={"frame": client})
         mgr = ClientAssignmentManager(srv, interval=3600, dither_algo="none")
         mgr.set_default_endpoint_id("ep1")
+
+        task = asyncio.create_task(mgr._feed_loop(endpoint))
+        try:
+            await asyncio.sleep(1.3)  # long enough for a second pass of the loop
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        assert pushes.get_nowait() is client
+        assert pushes.empty()
+
+    async def test_client_on_a_preset_waits_for_the_presets_interval(self, pushes, endpoint):
+        client = _feed_client()
+        srv = _server(clients={"frame": client})
+        preset = _preset(interval=3600)
+        mgr = _manager(server=srv, presets=[preset], interval=0.1, default_id="ep1")
+        mgr.assign_preset_to_client("frame", preset.preset_id)
 
         task = asyncio.create_task(mgr._feed_loop(endpoint))
         try:

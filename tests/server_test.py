@@ -6,6 +6,7 @@ import asyncio
 import io
 import json
 import socket
+import time
 from unittest.mock import MagicMock
 
 import aiohttp
@@ -215,6 +216,7 @@ class TestArtworkDelivery:
             await _until(lambda: client_id in server.clients)
             await _until(lambda: server.clients[client_id].stream_started)
 
+            before = time.time()
             await server.broadcast_image(_image("blue"))
             image = await frame.next_image()
         finally:
@@ -222,6 +224,7 @@ class TestArtworkDelivery:
 
         assert image.convert("RGB").getpixel((20, 15)) == (0, 0, 255)
         assert server.last_image_for(client_id) is not None
+        assert before <= server.last_image_sent_at(client_id) <= time.time()
 
     async def test_client_fed_by_an_endpoint_is_left_to_its_feed_loop(self, running):
         server, url = running
