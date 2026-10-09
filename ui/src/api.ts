@@ -152,6 +152,19 @@ export async function addEndpoint(body: NewEndpoint): Promise<Endpoint> {
   return r.json() as Promise<Endpoint>;
 }
 
+/** A blank or missing `api_key` / `token` keeps the one the server already has. */
+export async function updateEndpoint(id: string, body: NewEndpoint): Promise<Endpoint> {
+  const r = await fetch(`${BASE}/api/endpoints/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    throw new Error(await r.text());
+  }
+  return r.json() as Promise<Endpoint>;
+}
+
 // ------ Device Presets ------ //
 export async function getPresets(): Promise<DevicePreset[]> {
   const r = await fetch(`${BASE}/api/device-presets`);

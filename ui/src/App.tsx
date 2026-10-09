@@ -5,6 +5,7 @@ import { AddEndpointDialog } from '@/components/AddEndpointDialog';
 import { ClientCard } from '@/components/ClientCard';
 import { DevicePresetCard } from '@/components/DevicePresetCard';
 import { EditDevicePresetDialog } from '@/components/EditDevicePresetDialog';
+import { EditEndpointDialog } from '@/components/EditEndpointDialog';
 import { EndpointCard } from '@/components/EndpointCard';
 import { CardGrid, EmptyState } from '@/components/page';
 import { PageLayout } from '@/components/page-layout';
@@ -50,6 +51,7 @@ export default function App() {
   const [addOpen, setAddOpen] = useState(false);
   const [addPresetOpen, setAddPresetOpen] = useState(false);
   const [editingPreset, setEditingPreset] = useState<DevicePreset | null>(null);
+  const [editingEndpoint, setEditingEndpoint] = useState<Endpoint | null>(null);
   const [tab, setTab] = useState<'clients' | 'settings'>('clients');
 
   const fetchClients = useCallback(() => getClients(), []);
@@ -153,7 +155,12 @@ export default function App() {
                   ) : (
                     <CardGrid
                       contentSlot={endpoints.map((ep) => (
-                        <EndpointCard key={ep.id} endpoint={ep} onChanged={refresh} />
+                        <EndpointCard
+                          key={ep.id}
+                          endpoint={ep}
+                          onChanged={refresh}
+                          onEdit={setEditingEndpoint}
+                        />
                       ))}
                     />
                   )
@@ -211,6 +218,20 @@ export default function App() {
             }
           }}
           onSave={handleSaveEdit}
+        />
+      )}
+
+      {editingEndpoint && (
+        <EditEndpointDialog
+          key={editingEndpoint.id}
+          endpoint={editingEndpoint}
+          open={true}
+          onOpenChange={(open) => {
+            if (!open) {
+              setEditingEndpoint(null);
+            }
+          }}
+          onSaved={refresh}
         />
       )}
 
