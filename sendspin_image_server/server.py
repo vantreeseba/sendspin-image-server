@@ -28,9 +28,13 @@ from aiosendspin.server import (
     SendspinGroup,
     SendspinServer,
 )
-from aiosendspin.server.roles.artwork import ArtworkGroupRole, ArtworkRoleProtocol
+from aiosendspin.server.roles.artwork import (
+    ArtworkGroupRole,
+    ArtworkRoleProtocol,
+    ArtworkV1Role,
+)
 from aiosendspin.server.roles.metadata import Metadata, MetadataGroupRole
-from aiosendspin.server.roles.registry import register_group_role
+from aiosendspin.server.roles.registry import register_group_role, register_role
 
 from sendspin_image_server.client import ClientState
 from sendspin_image_server.dither import DitheringAlgo, DitheringPalette
@@ -39,6 +43,8 @@ from sendspin_image_server.stream import (
 )
 
 if TYPE_CHECKING:
+    from aiosendspin.models.core import ClientStatePayload
+
     from sendspin_image_server.registry import EndpointRegistry
 
 logger = logging.getLogger(__name__)
@@ -70,7 +76,37 @@ class ImageArtworkGroupRole(ArtworkGroupRole):
         self.emit_group_event(ArtworkStreamStartedEvent(role=role))
 
 
+class ImageArtworkRole(ArtworkV1Role):
+    """Artwork role that starts a hello-declared stream a second time.
+
+    A client that declares its channels in its hello is sent stream/start
+    straight after the server's hello. sendspin-cpp takes that in before it
+    has let go of the server it was connected to, and letting go resets its
+    artwork stream: every image after that is dropped. Its first client/state
+    is sent once the switch is done, so start the stream again then.
+    """
+
+    def __init__(self, client: SendspinClient | None = None) -> None:
+        """Initialize the role, with no client/state seen yet."""
+        super().__init__(client)
+        self._state_seen = False
+
+    def on_disconnect(self) -> None:
+        """Forget the client/state along with the stream."""
+        super().on_disconnect()
+        self._state_seen = False
+
+    def on_client_state(self, payload: ClientStatePayload) -> None:
+        """Restart a hello-declared stream on the connection's first client/state."""
+        super().on_client_state(payload)
+        first_state = not self._state_seen
+        self._state_seen = True
+        if first_state and self._stream_started and self._client.info.artwork_support is not None:
+            self._start_stream()
+
+
 register_group_role("artwork", ImageArtworkGroupRole)
+register_role("artwork@v1", lambda client: ImageArtworkRole(client=client))
 
 
 def _load_identity(data_dir: Path | None) -> Identity:
