@@ -337,8 +337,8 @@ class ClientAssignmentManager:
                 {
                     "source": ch.source,
                     "format": ch.format,
-                    "width": ch.media_width,
-                    "height": ch.media_height,
+                    "width": ch.width,
+                    "height": ch.height,
                 }
                 for ch in client.artwork_channels
             ]

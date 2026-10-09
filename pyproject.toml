@@ -10,10 +10,10 @@ requires-python = ">=3.12"
 license = { text = "Apache-2.0" }
 
 dependencies = [
-  "websockets>=14.0",
-  "zeroconf>=0.131.0",
-  "aiohttp>=3.9.0",
-  "Pillow>=10.0.0",
+  "aiosendspin>=10.0.0,<11",
+  "zeroconf>=0.147",
+  "aiohttp>=3.9.2",
+  "Pillow>=11.0.0",
   "numpy>=1.26.0",
   "aiosqlite>=0.20.0",
 ]

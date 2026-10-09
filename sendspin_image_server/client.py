@@ -1,58 +1,79 @@
-"""Per-client connection state and message handling."""
+"""Per-client connection state."""
 
 from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from websockets.asyncio.connection import Connection
+    from aiosendspin.server.roles.artwork import ArtworkRoleProtocol
 
 logger = logging.getLogger(__name__)
 
 ROLE_ARTWORK = "artwork@v1"
 ROLE_METADATA = "metadata@v1"
 
-SUPPORTED_ROLES = {ROLE_ARTWORK, ROLE_METADATA}
-
 
 @dataclass
 class ArtworkChannel:
-    """Artwork channel configuration from client hello.
+    """One artwork channel a client is currently streaming.
 
-    Supported format values (in addition to the standard 'jpeg', 'png', 'bmp'):
-      'e6-dithered' — server applies Floyd-Steinberg dithering to the six-color
-                      ACeP e-Paper palette before sending the image.
-
-    _raw_width/_raw_height store the dimensions as declared by the client;
-    media_width/media_height store the effective dimensions after any server
-    overrides are applied.  channel_index is the position in the channels array.
+    `width` and `height` are the exact size the client declared for the
+    delivered image. channel_index is the channel number (0-3).
     """
 
     source: str = "album"
     format: str = "jpeg"
-    media_width: int | None = None
-    media_height: int | None = None
+    width: int | None = None
+    height: int | None = None
     channel_index: int = field(default=0, repr=False)
 
-    @property
-    def wants_e6_dither(self) -> bool:
-        """Return True if this channel has requested e6-dithered output."""
-        return self.format == "e6-dithered"
+
+def server_time_us() -> int:
+    """Return current server monotonic time in microseconds."""
+    return int(time.monotonic() * 1_000_000)
 
 
-@dataclass
+@dataclass(eq=False)
 class ClientState:
-    """Mutable state for a connected Sendspin client."""
+    """A connected Sendspin client, as the image pipeline sees it.
+
+    One instance lives for one artwork stream: a client that reconnects, or
+    whose stream is restarted with a new configuration, gets a fresh one, which
+    is how the feed loops tell that it is due an image right away.
+    """
 
     client_id: str
     name: str
-    websocket: Connection
     active_roles: list[str] = field(default_factory=list)
-    artwork_channels: list[ArtworkChannel] = field(default_factory=list)
-    stream_started: bool = False
+    # The client's artwork role, once aiosendspin has started its stream.
+    artwork: ArtworkRoleProtocol | None = field(default=None, repr=False)
+    # Server clock the artwork timestamps are taken from.
+    clock: Callable[[], int] = field(default=server_time_us, repr=False)
+
+    @property
+    def artwork_channels(self) -> list[ArtworkChannel]:
+        """The channels currently streamed to this client, by channel number."""
+        if self.artwork is None:
+            return []
+        return [
+            ArtworkChannel(
+                source=config.source.value,
+                format=config.format.value if config.format is not None else "jpeg",
+                width=config.width,
+                height=config.height,
+                channel_index=channel,
+            )
+            for channel, config in sorted(self.artwork.get_channel_configs().items())
+        ]
+
+    @property
+    def stream_started(self) -> bool:
+        """Return True once the client streams at least one artwork channel."""
+        return bool(self.artwork is not None and self.artwork.get_channel_configs())
 
     @property
     def has_artwork(self) -> bool:
@@ -64,7 +85,7 @@ class ClientState:
         """Return True if this client has the metadata role active."""
         return ROLE_METADATA in self.active_roles
 
-
-def server_time_us() -> int:
-    """Return current server monotonic time in microseconds."""
-    return int(time.monotonic() * 1_000_000)
+    def send_artwork(self, channel: int, image_bytes: bytes) -> None:
+        """Queue an encoded image for display on `channel` now."""
+        if self.artwork is not None:
+            self.artwork.send_artwork(channel, image_bytes, self.clock())
