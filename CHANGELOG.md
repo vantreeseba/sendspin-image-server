@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v2.1.0 (2026-10-09)
+
+### Bug Fixes
+
+- **server**: Force connect a locked client when it is detected
+  ([`dc29326`](https://github.com/vantreeseba/sendspin-image-server/commit/dc293266442959aab1676b63a1cba5e24ec2d195))
+
+### Features
+
+- **dither**: Add ink-matched spectra 6 palette
+  ([`904a06f`](https://github.com/vantreeseba/sendspin-image-server/commit/904a06f44ec15ddca77a42e9cbe03eeb4957886a))
+
+
 ## v2.0.2 (2026-10-09)
 
 ### Bug Fixes
