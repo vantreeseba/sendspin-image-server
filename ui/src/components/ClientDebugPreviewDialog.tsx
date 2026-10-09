@@ -1,12 +1,8 @@
 import { useEffect, useState } from 'react';
 import { getDebugImage } from '@/api';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { DialogLayout } from '@/components/dialog-layout';
+import { Alert } from '@/components/ui/alert';
+import { Spinner } from '@/components/ui/spinner';
 
 interface Props {
   clientId: string;
@@ -65,22 +61,18 @@ function DebugPreview({ clientId }: { clientId: string }) {
 
   if (state.status === 'loading') {
     return (
-      <div className="flex items-center justify-center py-12">
-        <p className="text-muted-foreground text-sm">Loading preview…</p>
+      <div className="flex items-center justify-center py-12 text-foreground/60">
+        <Spinner label="Loading preview" />
       </div>
     );
   }
 
   if (state.status === 'error') {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <p className="text-destructive text-sm">{state.message}</p>
-      </div>
-    );
+    return <Alert variant="destructive" title="No preview" description={state.message} />;
   }
 
   return (
-    <div className="flex items-center justify-center rounded-lg border border-border/50 bg-muted/20 p-4">
+    <div className="flex items-center justify-center rounded-lg border border-foreground/10 bg-secondary p-4">
       <img
         src={state.url}
         alt="Client preview"
@@ -92,17 +84,12 @@ function DebugPreview({ clientId }: { clientId: string }) {
 
 export function ClientDebugPreviewDialog({ clientId, open, onOpenChange }: Props) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>
-            Preview — Client {clientId.split('-').at(-1) ?? clientId.slice(-6)}
-          </DialogTitle>
-          <DialogDescription>Image currently being sent to this client</DialogDescription>
-        </DialogHeader>
-
-        {open && <DebugPreview key={clientId} clientId={clientId} />}
-      </DialogContent>
-    </Dialog>
+    <DialogLayout
+      open={open}
+      onOpenChange={onOpenChange}
+      title={`Preview — Client ${clientId.split('-').at(-1) ?? clientId.slice(-6)}`}
+      description="Image currently being sent to this client"
+      contentSlot={open ? <DebugPreview key={clientId} clientId={clientId} /> : null}
+    />
   );
 }
