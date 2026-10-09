@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v2.0.2 (2026-10-09)
+
+### Bug Fixes
+
+- **server**: Restart artwork stream after a client switches servers
+  ([`2b304a6`](https://github.com/vantreeseba/sendspin-image-server/commit/2b304a6de43efe0e3a9f7033917d3ae8bfa3300d))
+
+
 ## v2.0.1 (2026-10-09)
 
 ### Bug Fixes
