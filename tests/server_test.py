@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 
 import aiohttp
 import pytest
+from aiohttp import web
 from aiosendspin.client.client import SendspinClient
 from aiosendspin.models.artwork import ArtworkChannel
 from aiosendspin.models.types import ArtworkSource, PictureFormat, Roles
@@ -115,6 +116,37 @@ async def running(tmp_path):
         yield server, f"ws://127.0.0.1:{port}/sendspin"
     finally:
         await server.stop()
+
+
+@pytest.fixture
+async def dialled_frame():
+    """Yield the URL of a frame the server can dial, and the reasons it was dialled with."""
+    reasons: asyncio.Queue[str] = asyncio.Queue()
+    sockets: list[web.WebSocketResponse] = []
+
+    async def _sendspin(request: web.Request) -> web.WebSocketResponse:
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        sockets.append(ws)
+        await ws.send_json(LEGACY_HELLO)
+        async for message in ws:
+            hello = json.loads(message.data) if message.type == aiohttp.WSMsgType.TEXT else {}
+            if hello.get("type") == "server/hello":
+                reasons.put_nowait(hello["payload"]["connection_reason"])
+        return ws
+
+    app = web.Application()
+    app.router.add_get("/sendspin", _sendspin)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = _free_port()
+    await web.TCPSite(runner, "127.0.0.1", port).start()
+    try:
+        yield f"ws://127.0.0.1:{port}/sendspin", reasons
+    finally:
+        for ws in sockets:
+            await ws.close()
+        await runner.cleanup()
 
 
 async def _until(predicate) -> None:
@@ -392,3 +424,27 @@ class TestOutboundConnections:
         finally:
             server.disconnect_from_client(url)
         assert server.get_discovered_urls() == []
+
+    async def test_locked_client_is_dialled_to_take_it_from_another_server(
+        self, running, dialled_frame
+    ):
+        server, _url = running
+        url, reasons = dialled_frame
+        server.registry.locked_clients_with_urls.return_value = [("old-frame", url)]
+        try:
+            server.connect_to_client(url, mdns_name="frame")
+
+            assert await asyncio.wait_for(reasons.get(), TIMEOUT) == "playback"
+        finally:
+            server.disconnect_from_client(url)
+
+    async def test_unlocked_client_is_left_to_the_server_it_is_on(self, running, dialled_frame):
+        server, _url = running
+        url, reasons = dialled_frame
+        server.registry.locked_clients_with_urls.return_value = [("other-frame", "ws://other")]
+        try:
+            server.connect_to_client(url, mdns_name="frame")
+
+            assert await asyncio.wait_for(reasons.get(), TIMEOUT) == "discovery"
+        finally:
+            server.disconnect_from_client(url)
