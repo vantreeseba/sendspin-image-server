@@ -30,7 +30,7 @@ from sendspin_image_server.endpoints import (
     ImmichEndpoint,
     LocalFolderEndpoint,
 )
-from sendspin_image_server.mdns import MDNSAdvertiser, MDNSDiscovery
+from sendspin_image_server.mdns import MDNSDiscovery
 from sendspin_image_server.registry import DevicePreset, EndpointRegistry
 from sendspin_image_server.server import SendspinImageServer
 from sendspin_image_server.stream import _resize_for_channel
@@ -53,25 +53,30 @@ _BUILTIN_LOCAL_PATH = pathlib.Path("/app/images")
 # TODO: run() defines every aiohttp handler as a closure, which is why it is
 # 375 statements long. Splitting the REST layer into its own module would let
 # these suppressions go away.
-async def run(  # noqa: C901, PLR0915
+async def run(  # noqa: C901, PLR0913, PLR0915
     host: str,
     port: int,
     name: str,
-    server_id: str,
     http_port: int,
     interval: float,
     dither_algo: DitheringAlgo,
     dither_palette: DitheringPalette = "e6",
     data_dir: pathlib.Path | None = None,
+    *,
+    allow_unencrypted: bool = True,
+    trust_unpaired: bool = True,
 ) -> int:
     """Run the Sendspin image server and HTTP / REST endpoints."""
     from aiohttp import web
 
-    server = SendspinImageServer(server_id=server_id, server_name=name)
+    server = SendspinImageServer(
+        server_name=name,
+        data_dir=data_dir,
+        allow_unencrypted=allow_unencrypted,
+        trust_unpaired=trust_unpaired,
+    )
+    # Also advertises the server over mDNS.
     await server.start(host=host, port=port)
-
-    mdns = MDNSAdvertiser(name=name, ws_port=port)
-    await mdns.start()
 
     def _on_client_added(url: str, mdns_name: str | None = None) -> None:
         server.connect_to_client(url, mdns_name=mdns_name)
@@ -174,8 +179,8 @@ async def run(  # noqa: C901, PLR0915
         for client in server.clients.values():
             if client.has_artwork and client.artwork_channels:
                 ch = client.artwork_channels[0]
-                if ch.media_width and ch.media_height:
-                    width, height = ch.media_width, ch.media_height
+                if ch.width and ch.height:
+                    width, height = ch.width, ch.height
                     break
 
         resized = await loop.run_in_executor(None, _resize_for_channel, raw, width, height)
@@ -708,12 +713,19 @@ async def run(  # noqa: C901, PLR0915
     registry.stop_all()
     await registry.wait_stopped()
     await discovery.stop()
-    await mdns.stop()
     await server.stop()
     await runner.cleanup()
     if db is not None:
         await db.close()
     return 0
+
+
+def _env_flag(name: str, *, default: bool) -> bool:
+    """Read a boolean from the environment variable `name`."""
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() not in ("", "0", "false", "no", "off")
 
 
 def main() -> None:
@@ -737,7 +749,26 @@ def main() -> None:
     parser.add_argument("--name", default="Sendspin Image Server")
     parser.add_argument(
         "--server-id",
-        default=f"sendspin-image-{uuid.uuid4().hex[:8]}",
+        default=None,
+        help="Ignored: the server id is now the public key of its saved identity",
+    )
+    parser.add_argument(
+        "--allow-unencrypted",
+        action=argparse.BooleanOptionalAction,
+        default=_env_flag("ALLOW_UNENCRYPTED", default=True),
+        help=(
+            "Accept clients that speak the pre-1.0 cleartext protocol "
+            "(env: ALLOW_UNENCRYPTED, default: on)"
+        ),
+    )
+    parser.add_argument(
+        "--trust-unpaired",
+        action=argparse.BooleanOptionalAction,
+        default=_env_flag("TRUST_UNPAIRED", default=True),
+        help=(
+            "Send images to any encrypted client that allows unpaired access, "
+            "without approving it first (env: TRUST_UNPAIRED, default: on)"
+        ),
     )
     parser.add_argument(
         "--log-level",
@@ -771,7 +802,10 @@ def main() -> None:
         type=pathlib.Path,
         default=pathlib.Path(_data_dir_default) if _data_dir_default else None,
         metavar="DIR",
-        help="Directory for persistent DB (env: DATA_DIR). Omit to run without persistence.",
+        help=(
+            "Directory for the DB and the server identity (env: DATA_DIR). "
+            "Omit to run without persistence."
+        ),
     )
     args = parser.parse_args()
 
@@ -779,6 +813,8 @@ def main() -> None:
         level=getattr(logging, args.log_level),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    if args.server_id is not None:
+        logger.warning("--server-id is ignored: the server id is its public key")
 
     raise SystemExit(
         asyncio.run(
@@ -786,12 +822,13 @@ def main() -> None:
                 host=args.host,
                 port=args.port,
                 name=args.name,
-                server_id=args.server_id,
                 http_port=args.http_port,
                 interval=args.interval,
                 dither_algo=args.dither_algo,
                 dither_palette=args.dither_palette,
                 data_dir=args.data_dir,
+                allow_unencrypted=args.allow_unencrypted,
+                trust_unpaired=args.trust_unpaired,
             )
         )
     )

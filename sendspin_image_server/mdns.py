@@ -1,20 +1,20 @@
-"""mDNS advertisement and client discovery for the Sendspin image server."""
+"""mDNS client discovery for the Sendspin image server.
+
+The server itself is advertised by aiosendspin.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import socket
 from collections.abc import Callable
 from ipaddress import ip_address
 
-from zeroconf import ServiceInfo, ServiceStateChange, Zeroconf
-from zeroconf._exceptions import NonUniqueNameException
+from zeroconf import ServiceStateChange, Zeroconf
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZeroconf
 
 logger = logging.getLogger(__name__)
 
-SERVER_SERVICE_TYPE = "_sendspin-server._tcp.local."
 CLIENT_SERVICE_TYPE = "_sendspin._tcp.local."
 
 
@@ -28,91 +28,6 @@ def _first_valid_ip(addresses: list[str]) -> str | None:
         if not addr.is_link_local and not addr.is_unspecified:
             return addr_str
     return None
-
-
-_MDNS_PORT = 5353
-
-
-class MDNSAdvertiser:
-    """Advertises the Sendspin server via mDNS (_sendspin-server._tcp.local.)."""
-
-    def __init__(self, name: str, ws_port: int, path: str = "/sendspin") -> None:
-        self._name = name
-        self._ws_port = ws_port
-        self._path = path
-        self._zeroconf: AsyncZeroconf | None = None
-        self._info: ServiceInfo | None = None
-
-    async def start(self) -> None:
-        """Start mDNS advertisement (must be called from within a running event loop)."""
-        hostname = socket.gethostname()
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-                s.connect(("8.8.8.8", 80))
-                local_ip = s.getsockname()[0]
-        except OSError:
-            local_ip = "127.0.0.1"
-
-        self._zeroconf = AsyncZeroconf()
-
-        base_name = self._name
-        self._info = None
-        last_exception: Exception | None = None
-
-        for attempt in range(1, 11):
-            service_name = (
-                f"{base_name}.{SERVER_SERVICE_TYPE}"
-                if attempt == 1
-                else f"{base_name}-{attempt}.{SERVER_SERVICE_TYPE}"
-            )
-            service_info = ServiceInfo(
-                SERVER_SERVICE_TYPE,
-                service_name,
-                addresses=[socket.inet_aton(local_ip)],
-                port=self._ws_port,
-                properties={"path": self._path},
-                server=f"{hostname}.local.",
-            )
-            try:
-                await self._zeroconf.async_register_service(service_info)
-                self._info = service_info
-                break
-            except NonUniqueNameException as exc:
-                last_exception = exc
-                logger.warning(
-                    "mDNS: name '%s' is in use, retrying with suffix %d",
-                    service_name, attempt,
-                )
-                await self._zeroconf.async_unregister_service(service_info)
-            except Exception:
-                await self._zeroconf.async_close()
-                self._zeroconf = None
-                self._info = None
-                raise
-
-        if self._info is None:
-            await self._zeroconf.async_close()
-            self._zeroconf = None
-            logger.warning(
-                "mDNS: could not advertise service after 10 attempts (last: %s) — "
-                "continuing without mDNS",
-                last_exception,
-            )
-
-        if self._info is not None:
-            logger.info(
-                "mDNS: advertising '%s' on %s:%d%s (mDNS port: %d)",
-                self._name, local_ip, self._ws_port, self._path, _MDNS_PORT,
-            )
-
-    async def stop(self) -> None:
-        """Stop mDNS advertisement."""
-        if self._zeroconf is not None and self._info is not None:
-            await self._zeroconf.async_unregister_service(self._info)
-            await self._zeroconf.async_close()
-            self._zeroconf = None
-            self._info = None
-            logger.info("mDNS: advertisement stopped")
 
 
 class MDNSDiscovery:

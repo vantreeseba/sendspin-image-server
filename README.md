@@ -217,9 +217,11 @@ All settings can be provided as environment variables or CLI flags. Environment 
 
 | Environment variable | CLI flag        | Default                   | Description                                                                  |
 |----------------------|-----------------|---------------------------|------------------------------------------------------------------------------|
-| `DATA_DIR`           | `--data-dir`    | *(none)*                  | Directory for persistent storage. Omit to run without saving settings.       |
+| `DATA_DIR`           | `--data-dir`    | *(none)*                  | Directory for persistent storage (settings, server identity). Omit to run without saving. |
 | `WS_PORT`            | `--port`        | `8927`                    | Port for the internal Sendspin WebSocket protocol                            |
 | `HTTP_PORT`          | `--http-port`   | `8928`                    | Port for the web UI and REST API                                             |
+| `ALLOW_UNENCRYPTED`  | `--allow-unencrypted` / `--no-allow-unencrypted` | on | Accept displays that still speak the older, unencrypted Sendspin protocol |
+| `TRUST_UNPAIRED`     | `--trust-unpaired` / `--no-trust-unpaired` | on | Send images to any encrypted display that allows unpaired access |
 | —                    | `--host`        | `0.0.0.0`                 | Network address to listen on                                                 |
 | —                    | `--interval`    | `120`                     | Seconds between image advances (server-wide default; overridable per display)|
 | —                    | `--dither-algo` | `none`                    | Default dithering algorithm; overridable per display in the UI               |

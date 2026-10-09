@@ -12,6 +12,8 @@ import tempfile
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from aiosendspin.models.artwork import ArtworkChannel
+from aiosendspin.models.types import ArtworkSource, PictureFormat
 
 from sendspin_image_server.assignments import ClientAssignmentManager
 from sendspin_image_server.client import ROLE_ARTWORK, ClientState
@@ -28,6 +30,17 @@ def _server(clients=None, discovered=None):
     srv.clients = clients or {}
     srv.get_discovered_urls.return_value = discovered or []
     return srv
+
+
+def _artwork_role() -> MagicMock:
+    """Return an aiosendspin artwork role streaming one 800x480 JPEG channel."""
+    role = MagicMock()
+    role.get_channel_configs.return_value = {
+        0: ArtworkChannel(
+            source=ArtworkSource.ALBUM, format=PictureFormat.JPEG, width=800, height=480
+        )
+    }
+    return role
 
 
 def _ep(eid: str = "ep1", name: str = "Endpoint") -> LocalFolderEndpoint:
@@ -267,13 +280,11 @@ class TestClientInfo:
         assert mgr.client_info() == []
 
     def test_connected_client_shows_status_connected(self):
-        ws = MagicMock()
         cs = ClientState(
             client_id="c1",
             name="Frame",
-            websocket=ws,
             active_roles=[ROLE_ARTWORK],
-            stream_started=True,
+            artwork=_artwork_role(),
         )
         srv = _server(clients={"c1": cs})
         ep = _ep()
@@ -292,13 +303,11 @@ class TestClientInfo:
         assert result[0]["discovered_only"] is True
 
     def test_connected_client_comes_before_discovered(self):
-        ws = MagicMock()
         cs = ClientState(
             client_id="c1",
             name="Frame",
-            websocket=ws,
             active_roles=[ROLE_ARTWORK],
-            stream_started=True,
+            artwork=_artwork_role(),
         )
         srv = _server(
             clients={"c1": cs},
@@ -323,13 +332,11 @@ class TestClientInfo:
         assert result[0]["id"] == "c2"
 
     def test_client_info_includes_endpoint_name(self):
-        ws = MagicMock()
         cs = ClientState(
             client_id="c1",
             name="Frame",
-            websocket=ws,
             active_roles=[ROLE_ARTWORK],
-            stream_started=True,
+            artwork=_artwork_role(),
         )
         srv = _server(clients={"c1": cs})
         ep = _ep(name="My Photos")
@@ -338,13 +345,11 @@ class TestClientInfo:
         assert result[0]["endpoint_name"] == "My Photos"
 
     def test_client_info_includes_dither_algo(self):
-        ws = MagicMock()
         cs = ClientState(
             client_id="c1",
             name="Frame",
-            websocket=ws,
             active_roles=[ROLE_ARTWORK],
-            stream_started=True,
+            artwork=_artwork_role(),
         )
         srv = _server(clients={"c1": cs})
         ep = _ep()

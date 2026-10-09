@@ -5,11 +5,10 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
-import struct
 
 from PIL import Image
 
-from sendspin_image_server.client import ClientState, server_time_us
+from sendspin_image_server.client import ClientState
 from sendspin_image_server.dither import (
     DitheringAlgo,
     DitheringPalette,
@@ -18,27 +17,6 @@ from sendspin_image_server.dither import (
 )
 
 logger = logging.getLogger(__name__)
-
-# Binary message type bytes
-MSG_TYPE_ARTWORK_CH0 = 0x08
-MSG_TYPE_ARTWORK_CH1 = 0x09
-MSG_TYPE_ARTWORK_CH2 = 0x0A
-MSG_TYPE_ARTWORK_CH3 = 0x0B
-
-
-def build_artwork_message(channel: int, timestamp_us: int, image_bytes: bytes) -> bytes:
-    """Build a binary artwork message for the given channel (0-3).
-
-    Format: [type][8-byte big-endian int64 timestamp µs][image bytes]
-    Channel 0 = type 8, channel 1 = type 9, etc.
-    """
-    if channel < 0 or channel > 3:
-        msg = f"Artwork channel must be 0-3, got {channel}"
-        raise ValueError(msg)
-    msg_type = MSG_TYPE_ARTWORK_CH0 + channel
-    header = struct.pack(">Bq", msg_type, timestamp_us)
-    return header + image_bytes
-
 
 def _resize_for_channel(
     image_bytes: bytes, max_width: int, max_height: int
@@ -89,41 +67,36 @@ async def push_image_to_client(
     dither_algo: DitheringAlgo = "floyd-steinberg",
     dither_palette: DitheringPalette = "e6",
 ) -> bytes | None:
-    """Send an artwork binary message to a single client.
+    """Send an image to one artwork channel of a single client.
 
-    Per the Sendspin spec, the image is resized to fit within the dimensions
-    the client declared in client/hello (or updated via stream/request-format).
+    The image is resized to the exact dimensions the client declared for the
+    channel and encoded in the channel's format. If *force_e6_dither* is True,
+    dithering to the chosen palette is applied after resizing (always
+    post-resize, never before).
 
-    If the client's artwork channel has format 'e6-dithered', or if
-    *force_e6_dither* is True, dithering to the chosen palette is applied
-    after resizing (always post-resize, never before).
+    Returns the encoded bytes handed to the client, or None if the client is
+    not streaming `channel`.
     """
-    # Guard: if channel is out of range, return early (nothing was sent)
-    if channel < 0 or channel >= len(client.artwork_channels):
+    ch = next((c for c in client.artwork_channels if c.channel_index == channel), None)
+    if ch is None:
         logger.debug(
-            "Channel %d out of range for client %s (%d channels), returning",
-            channel, client.client_id, len(client.artwork_channels),
+            "Client %s is not streaming channel %d, returning", client.client_id, channel
         )
         return None
 
     loop = asyncio.get_event_loop()
 
-    ch = client.artwork_channels[channel]
-
-    # Resize to the client's requested dimensions (only if declared)
-    if ch.media_width is not None and ch.media_height is not None:
+    if ch.width is not None and ch.height is not None:
         image_bytes = await loop.run_in_executor(
-            None, _resize_for_channel, image_bytes, ch.media_width, ch.media_height
+            None, _resize_for_channel, image_bytes, ch.width, ch.height
         )
 
-    # Determine output format from the channel's declared format.
-    # 'e6-dithered' is a processing directive, not a container format;
-    # it encodes the result as JPEG.  Unknown values fall back to JPEG.
-    fmt_map = {"jpeg": "JPEG", "png": "PNG", "bmp": "BMP", "e6-dithered": "JPEG"}
+    # Unknown values fall back to JPEG. 'bmp' was dropped from the spec but
+    # older clients may still declare it.
+    fmt_map = {"jpeg": "JPEG", "png": "PNG", "bmp": "BMP"}
     output_format = fmt_map.get(ch.format.lower(), "JPEG")
 
-    # Apply dithering if requested by client or forced by caller
-    if ch.wants_e6_dither or force_e6_dither:
+    if force_e6_dither:
         logger.debug(
             "Applying dithering (algo=%s, palette=%s) for client %s channel %d → %s",
             dither_algo, dither_palette, client.client_id, channel, output_format,
@@ -134,17 +107,13 @@ async def push_image_to_client(
     else:
         # Re-encode to the client's requested format even without dithering
         def _reencode(data: bytes, fmt: str) -> bytes:
-            import io as _io
-
-            from PIL import Image as _Image
-            img = _Image.open(_io.BytesIO(data)).convert("RGB")
+            img = Image.open(io.BytesIO(data)).convert("RGB")
             return encode_pil(img, fmt)
 
         image_bytes = await loop.run_in_executor(
             None, _reencode, image_bytes, output_format
         )
 
-    ts = server_time_us()
-    msg = build_artwork_message(channel, ts, image_bytes)
-    await client.websocket.send(msg)
+    # aiosendspin frames the image for the wire the client speaks.
+    client.send_artwork(channel, image_bytes)
     return image_bytes

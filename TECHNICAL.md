@@ -45,39 +45,45 @@ This document covers the internals of sendspin-image-server for contributors and
 **Data flow, top to bottom:**
 
 1. `MDNSDiscovery` (`mdns.py`) watches for `_sendspin._tcp.local.` announcements. When a display appears, it calls `server.connect_to_client(url)`.
-2. `SendspinImageServer` (`server.py`) opens an outbound WebSocket to that URL and runs the Sendspin handshake. On success, a `ClientState` is added to `server.clients`.
+2. `SendspinImageServer` (`server.py`) has aiosendspin open an outbound WebSocket to that URL and run the Sendspin handshake. On success, a `ClientState` is added to `server.clients`.
 3. The `EndpointRegistry` (`registry.py`) runs one asyncio task per image provider. Each task wakes up every second, checks which assigned clients are due for a new image, fetches the next image from the provider, and calls `push_image_to_client`.
-4. `push_image_to_client` (`stream.py`) resizes the image to the display's declared pixel dimensions, optionally dithers it, and sends a binary WebSocket frame.
+4. `push_image_to_client` (`stream.py`) resizes the image to the display's declared pixel dimensions, optionally dithers it, and hands the encoded image to the client's artwork role.
 5. The React SPA (`ui/`) talks to the REST API (`cli.py`) and renders current state.
 
 ---
 
 ## Sendspin Protocol
 
-The Sendspin protocol runs over WebSocket. The transport is a mix of JSON text messages (control) and binary messages (image frames). The key design point is that **the server dials out to clients** — clients advertise themselves via mDNS and wait; the server initiates the WebSocket connection.
-
-### Message types
-
-| Direction      | Type                    | Format | Description                                               |
-|----------------|-------------------------|--------|-----------------------------------------------------------|
-| client → server | `client/hello`         | JSON   | First message; declares client identity and supported roles |
-| server → client | `server/hello`         | JSON   | Acknowledges the hello; confirms active roles and connection reason |
-| server → client | `stream/start`         | JSON   | Declares the stream format (channel count, image dimensions, wire format) |
-| server → client | `server/state`         | JSON   | Sends metadata (title, artist, playback progress) to metadata-role clients |
-| server → client | artwork binary frame   | binary | `[type byte][8-byte big-endian int64 timestamp µs][image bytes]` |
-| client → server | `stream/request-format` | JSON  | Client requests a change to channel format or dimensions   |
-| client → server | `client/time`          | JSON   | Clock-sync request                                        |
-| server → client | `server/time`          | JSON   | Clock-sync response                                       |
-| client → server | `client/goodbye`       | JSON   | Graceful disconnect; carries a `reason` string            |
+The server speaks [Sendspin](https://github.com/Sendspin/spec) 1.0.0-rc1 through the [`aiosendspin`](https://pypi.org/project/aiosendspin/) library: the handshake, encryption, clock sync, message framing and reconnects are all aiosendspin's. `SendspinImageServer` (`server.py`) is a thin layer on top that tracks which clients have an artwork stream and decides which image each one gets. The key design point is that **the server dials out to clients** — clients advertise themselves via mDNS and wait; the server initiates the WebSocket connection.
 
 ### Roles
 
-Clients declare which roles they support in `client/hello` via `supported_roles`. The server activates the first version of each role family it recognises:
+Only two roles matter here; aiosendspin negotiates them (and ignores the audio roles, since nothing is ever played):
 
 | Role        | Description                                                          |
 |-------------|----------------------------------------------------------------------|
-| `artwork@v1` | Client accepts binary image frames on artwork channels              |
-| `metadata@v1` | Client wants `server/state` messages with playback metadata        |
+| `artwork@v1` | Client accepts images on up to four artwork channels                |
+| `metadata@v1` | Client gets a `server/state` with the title "Image Server"         |
+
+A client declares each artwork channel as a `source`, a `format` (`jpeg` or `png`) and the exact `width` and `height` it wants delivered. The stream starts once those are known, and `ClientState.artwork_channels` reflects them.
+
+### Encryption, pairing and old clients
+
+Sendspin 1.0 connections are encrypted with Noise, and the server and each client are identified by a Curve25519 public key. The server's key pair is created on first start and kept in `DATA_DIR/sendspin_identity.key` (mode 0600); approved clients are kept in `DATA_DIR/sendspin_pairing.json`. Without a data directory both live in memory, so the server has a new id after every restart.
+
+What a client is sent depends on how it connects:
+
+| Client                                             | Result |
+|----------------------------------------------------|--------|
+| Encrypted, has **unpaired access** enabled         | Approved automatically and sent images. Turn this off with `--no-trust-unpaired` (`TRUST_UNPAIRED=0`). |
+| Encrypted, requires pairing                        | Connects but gets no images. Pairing is not implemented in this server yet; a warning is logged. |
+| Cleartext, pre-1.0 protocol                        | Accepted and sent images in the old one-message-per-image framing. Turn this off with `--no-allow-unencrypted` (`ALLOW_UNENCRYPTED=0`). |
+
+A cleartext client can claim any id, so it is never approved or paired. Two limits apply to cleartext clients: aiosendspin holds their first image until they send a `client/state` (or for 5 seconds if they never do), and a hello that declares a channel format other than `jpeg`, `png` or `bmp` — such as the `e6-dithered` format older versions of this server accepted — is rejected as malformed. Dithering is chosen per client in the UI instead.
+
+### Why the group artwork role is replaced
+
+aiosendspin normally keeps one artwork image per group and sends it, letterboxed and re-encoded, to every member — or clears the display when the group has none. This server resizes and dithers per client, so `server.py` registers `ImageArtworkGroupRole` in its place: it holds no image and instead reports each stream start as an `ArtworkStreamStartedEvent`. `SendspinImageServer` then builds a fresh `ClientState` for that stream and pushes through `ArtworkV1Role.send_artwork`, which frames the bytes for whichever wire the client speaks.
 
 ### `connection_reason` field
 
@@ -88,28 +94,16 @@ Clients declare which roles they support in `client/hello` via `supported_roles`
 | `discovery` | Standard mDNS discovery (default)                                   |
 | `playback`  | Forced reconnect triggered by the user via the Force Connect button  |
 
-### Binary frame format
-
-```
-Byte 0      : message type
-              0x08 = artwork channel 0
-              0x09 = artwork channel 1
-              0x0A = artwork channel 2
-              0x0B = artwork channel 3
-Bytes 1–8   : server monotonic timestamp in microseconds (big-endian int64)
-Bytes 9+    : raw image bytes (JPEG, PNG, or BMP depending on channel negotiation)
-```
-
 ---
 
 ## mDNS Service Types
 
 | Role    | Service type                   | Who registers it         |
 |---------|--------------------------------|--------------------------|
-| Server  | `_sendspin-server._tcp.local.` | `MDNSAdvertiser` in `mdns.py` |
+| Server  | `_sendspin-server._tcp.local.` | aiosendspin, when the server starts |
 | Client  | `_sendspin._tcp.local.`        | The e-Paper display itself |
 
-The server advertises its own presence so that future Sendspin clients could theoretically discover servers. Currently, only the client service type is consumed: `MDNSDiscovery` browses for `_sendspin._tcp.local.`, extracts the host address, port, and `/sendspin` path from the service record, and builds a `ws://host:port/sendspin` URL to connect to.
+The server advertises itself so that clients which dial servers can find it. Client discovery is this project's own `MDNSDiscovery` (`mdns.py`) rather than aiosendspin's, because it also reports the mDNS instance name and every re-announcement: it browses for `_sendspin._tcp.local.`, extracts the host address, port, and `/sendspin` path from the service record, and builds a `ws://host:port/sendspin` URL to connect to.
 
 Service records may include a `path` TXT property. If present, it overrides the default `/sendspin` path in the constructed WebSocket URL.
 
@@ -117,31 +111,30 @@ Service records may include a `path` TXT property. If present, it overrides the 
 
 ## Connection Lifecycle
 
-### Outbound connection loop
+### Outbound connections
 
 ```
 connect_to_client(url)
-  └─ _outbound_connection_loop(url)
-       └─ websockets.connect(url) ──► _handle_connection()
-            1. recv client/hello
-            2. send server/hello  (with connection_reason)
-            3. send stream/start
-            4. push last_image to new client (if any, and only when no
-               endpoint feeds it — the feed loop pushes to those on connect)
-            5. send server/state (metadata clients only)
-            6. message loop until disconnect or client/goodbye
-       ↑ on disconnect: exponential backoff (1s → 2s → 4s … cap 15s)
-       ↑ on mDNS re-announce: retry immediately, backoff reset
-       ↑ on goodbye reason "another_server": stop retrying
+  └─ SendspinServer.connect_to_client(url, retry_initial_connection=True)
+       1. handshake (Noise for 1.0 clients, client/hello for older ones)
+       2. ClientConnectedEvent  → ClientState created, registry.ensure_client()
+       3. stream/start once the client's artwork channels are known
+       4. ArtworkStreamStartedEvent → fresh ClientState, registry.client_connected(),
+          push last_image (if any, and only when no endpoint feeds the client —
+          the feed loop pushes to those on connect)
+       5. ClientDisconnectedEvent → registry.client_disconnected()
+       ↑ on disconnect: exponential backoff (1s → 2s → 4s … cap 300s)
+       ↑ on mDNS re-announce: retry immediately
+       ↑ on a goodbye that asks not to be redialled: stop retrying
 ```
 
-When `MDNSDiscovery` fires `on_client_removed`, the corresponding outbound task is cancelled immediately via `disconnect_from_client`.
+When `MDNSDiscovery` fires `on_client_removed`, the outbound connection is stopped via `disconnect_from_client`.
 
 ### Exponential backoff
 
-The retry loop starts at 1 second, doubles on each failure, and caps at 15 seconds. A successful connection resets the backoff to 1 second.
+aiosendspin's retry loop starts at 1 second, doubles on each failure, and caps at 300 seconds. The backoff returns to 1 second after a connection that lasted at least 10 seconds.
 
-The cap is short on purpose: a battery device that deep-sleeps is only reachable for a brief window each time it wakes. For the same reason, `MDNSDiscovery` reports a client every time it announces itself, and `connect_to_client` on a URL that is already managed cuts the current backoff short and retries at once.
+A battery device that deep-sleeps is only reachable for a brief window each time it wakes, so the server does not rely on the backoff to catch it: `MDNSDiscovery` reports a client every time it announces itself, and `connect_to_client` on a URL that is already managed cuts the current backoff short and retries at once.
 
 ### Push on connect
 
@@ -151,7 +144,7 @@ Two more things keep that window short. The feed loop is woken the moment a clie
 
 ### Client-initiated connections
 
-A client may also dial the server itself (`ws://<server>:8927/sendspin`), which skips mDNS discovery altogether. If the server dials the same client at the same time, the client keeps one connection and closes the other; the server tracks every live connection per client and keeps serving whichever one survives.
+A client may also dial the server itself (`ws://<server>:8927/sendspin`), which skips mDNS discovery altogether. If the server dials the same client at the same time, the client keeps one connection and closes the other; aiosendspin keeps the newer connection and closes the older one.
 
 ### Sleeping clients
 
@@ -159,11 +152,11 @@ The server notes when each client's last connection closed, and how long it was 
 
 ### `goodbye` reason `another_server`
 
-If the client sends `client/goodbye` with `reason: "another_server"`, the loop exits without retrying. This prevents competing with a different Sendspin server that the display has chosen to connect to.
+If the client sends `client/goodbye` with `reason: "another_server"`, aiosendspin stops redialling it. This prevents competing with a different Sendspin server that the display has chosen to connect to.
 
 ### Force reconnect
 
-`POST /api/clients/{id}/connect` calls `server.reconnect_to_client(url, connection_reason="playback")`. This cancels any existing outbound task and starts a fresh loop, bypassing the backoff delay.
+`POST /api/clients/{id}/connect` calls `server.reconnect_to_client(url, connection_reason="playback")`. This dials the client again right away — also when retries had stopped — and tells it the server wants to take over.
 
 ---
 
@@ -198,10 +191,10 @@ The effective interval for a client is its explicit per-client override (if > 0)
 
 Inside `push_image_to_client` (`stream.py`):
 
-1. **Resize** — the image is scaled to fit within the dimensions the client declared in `client/hello` (letterboxed on a white canvas using Lanczos resampling). This step is skipped if the client did not declare dimensions.
-2. **Dither** — if the client's channel format is `e6-dithered`, or if `force_e6_dither=True`, `floyd_steinberg_e6()` is called with the configured algorithm and palette.
+1. **Resize** — the image is scaled to fit within the dimensions the client declared for the channel (letterboxed on a white canvas using Lanczos resampling — the spec asks for black bars, but white suits e-paper).
+2. **Dither** — if `force_e6_dither=True` (set from the client's dither settings), `floyd_steinberg_e6()` is called with the configured algorithm and palette.
 3. **Re-encode** — even without dithering, the image is re-encoded to the wire format the client's channel declared (`jpeg`, `png`, or `bmp`).
-4. **Frame** — `build_artwork_message()` wraps the image bytes in the binary frame format and the frame is sent over the WebSocket.
+4. **Send** — `ClientState.send_artwork()` passes the bytes to aiosendspin, which frames them for the protocol version the client speaks.
 
 All CPU-bound image work (resize, dither, encode) runs in the default thread pool executor via `loop.run_in_executor` to avoid blocking the event loop.
 

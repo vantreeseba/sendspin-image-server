@@ -1,73 +1,140 @@
-"""Core Sendspin server: WebSocket handler and protocol logic."""
+"""Core Sendspin server: an aiosendspin server that only serves artwork."""
 
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import uuid
+import os
+from collections.abc import Callable, Coroutine
+from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import websockets
-import websockets.exceptions
-
-from sendspin_image_server.client import (
-    ROLE_ARTWORK,
-    SUPPORTED_ROLES,
-    ArtworkChannel,
-    ClientState,
-    server_time_us,
+from aiosendspin.models.types import ConnectionReason
+from aiosendspin.noise.keys import Identity
+from aiosendspin.noise.trust_store import (
+    FileServerPairingStore,
+    InMemoryServerPairingStore,
+    ServerPairingStore,
 )
+from aiosendspin.server import (
+    ClientConnectedEvent,
+    ClientDisconnectedEvent,
+    ClientRemovedEvent,
+    GroupEvent,
+    GroupRoleEvent,
+    SendspinClient,
+    SendspinEvent,
+    SendspinGroup,
+    SendspinServer,
+)
+from aiosendspin.server.roles.artwork import ArtworkGroupRole, ArtworkRoleProtocol
+from aiosendspin.server.roles.metadata import Metadata, MetadataGroupRole
+from aiosendspin.server.roles.registry import register_group_role
+
+from sendspin_image_server.client import ClientState
 from sendspin_image_server.dither import DitheringAlgo, DitheringPalette
 from sendspin_image_server.stream import (
     push_image_to_client,
 )
 
 if TYPE_CHECKING:
-    from websockets.asyncio.connection import Connection
-    from websockets.asyncio.server import Server, ServerConnection
-
     from sendspin_image_server.registry import EndpointRegistry
 
 logger = logging.getLogger(__name__)
 
-# Longest wait between outbound reconnect attempts. Kept short because battery
-# devices are only reachable for a brief window each time they wake.
-_MAX_RECONNECT_BACKOFF = 15.0
+# Files kept in the data directory so the server keeps its id, and the clients
+# it has paired with or approved, across restarts.
+IDENTITY_FILE = "sendspin_identity.key"
+PAIRING_FILE = "sendspin_pairing.json"
 
-SERVER_VERSION = 1
+
+@dataclass
+class ArtworkStreamStartedEvent(GroupRoleEvent):
+    """A client's artwork stream started, or restarted with new channels."""
+
+    role: ArtworkRoleProtocol
+
+
+class ImageArtworkGroupRole(ArtworkGroupRole):
+    """Group artwork role that leaves the choice of image to this server.
+
+    The stock role answers every stream start with the group's current artwork,
+    or a clear when it has none. Images here are resized and dithered per
+    client, so the group never holds one: report the stream start and let
+    `SendspinImageServer` push instead of blanking the display.
+    """
+
+    def send_current_artwork(self, role: ArtworkRoleProtocol) -> None:
+        """Report the stream instead of replaying group artwork."""
+        self.emit_group_event(ArtworkStreamStartedEvent(role=role))
+
+
+register_group_role("artwork", ImageArtworkGroupRole)
+
+
+def _load_identity(data_dir: Path | None) -> Identity:
+    """Return the server's identity, creating and saving one on first run."""
+    if data_dir is None:
+        logger.warning(
+            "No data directory: the server id changes on every start, so clients "
+            "that remember this server will not recognise it"
+        )
+        return Identity.generate()
+    path = data_dir / IDENTITY_FILE
+    if path.exists():
+        return Identity.from_private_bytes(path.read_bytes())
+    identity = Identity.generate()
+    data_dir.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(identity.private_bytes)
+    logger.info("Created server identity %s", path)
+    return identity
 
 
 class SendspinImageServer:
     """Sendspin server that pushes artwork to clients."""
 
-    def __init__(self, server_id: str, server_name: str) -> None:
-        self._server_id = server_id
+    def __init__(
+        self,
+        server_name: str,
+        data_dir: Path | None = None,
+        *,
+        allow_unencrypted: bool = True,
+        trust_unpaired: bool = True,
+    ) -> None:
         self._server_name = server_name
+        self._data_dir = data_dir
+        self._allow_unencrypted = allow_unencrypted
+        self._trust_unpaired = trust_unpaired
+        self._sendspin: SendspinServer | None = None
+        self._unsubscribe: Callable[[], None] | None = None
         self._clients: dict[str, ClientState] = {}
-        # client_id → every live connection, oldest first. A client can briefly
-        # hold two (it dialled us while we dialled it) before it drops one;
-        # `_clients` always points at the newest.
-        self._connections: dict[str, list[ClientState]] = {}
-        self._ws_server: Server | None = None
+        # client_id → the connection its ClientState was built for
+        self._connections: dict[str, object] = {}
+        # client_ids already reported to the registry for their current connection
+        self._announced: set[str] = set()
+        # client_id → (group, unsubscribe) for the group we listen to for stream starts
+        self._group_listeners: dict[str, tuple[SendspinGroup, Callable[[], None]]] = {}
+        self._tasks: set[asyncio.Task[None]] = set()
         self._last_image: dict[str | None, bytes | None] = {None: None}
         self._last_image_channel: int = 0
-        # url → task for server-initiated outbound connections
-        self._outbound_tasks: dict[str, asyncio.Task[None]] = {}
-        # url → event that cuts a reconnect backoff short (set when the client is seen again)
-        self._outbound_wake: dict[str, asyncio.Event] = {}
         # url → url: all URLs we are tracking (discovered via mDNS or connect_to_client)
         self._discovered_clients: dict[str, str] = {}
         # url → mDNS instance name (e.g. "photo-frame-2")
         self._discovered_client_names: dict[str, str] = {}
-        # url → real client_id: populated after a successful client/hello handshake
-        self._url_to_client_id: dict[str, str] = {}
         # Optional back-reference to the registry — set by cli.py after both are created
         self._registry: EndpointRegistry | None = None
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    @property
+    def server_id(self) -> str | None:
+        """The server's id (its public key), or None before `start()`."""
+        return self._sendspin.id if self._sendspin is not None else None
 
     @property
     def last_image(self) -> bytes | None:
@@ -84,11 +151,20 @@ class SendspinImageServer:
 
     def client_id_for_url(self, url: str) -> str | None:
         """Return the client_id learned for an outbound `url`, or None if not handshaked."""
-        return self._url_to_client_id.get(url)
+        if self._sendspin is None:
+            return None
+        return self._sendspin.get_client_id_for_url(url)
 
     @property
     def clients(self) -> dict[str, ClientState]:
         """Read-only view of currently connected clients."""
+        if self._sendspin is not None:
+            # Roles are activated after the connection is reported, and again
+            # once an unpaired client is approved.
+            for client_id, state in self._clients.items():
+                client = self._sendspin.get_client(client_id)
+                if client is not None:
+                    state.active_roles = client.active_role_ids
         return self._clients
 
     @property
@@ -101,177 +177,100 @@ class SendspinImageServer:
         self._registry = value
 
     async def start(self, host: str = "0.0.0.0", port: int = 8927) -> None:
-        """Start the WebSocket server."""
-        self._ws_server = await websockets.serve(
-            self._serve_inbound,
-            host,
-            port,
-            subprotocols=None,
+        """Start the Sendspin server and advertise it over mDNS."""
+        identity = _load_identity(self._data_dir)
+        pairing_store: ServerPairingStore
+        if self._data_dir is not None:
+            pairing_store = await FileServerPairingStore.open(self._data_dir / PAIRING_FILE)
+        else:
+            pairing_store = InMemoryServerPairingStore()
+        self._sendspin = SendspinServer(
+            asyncio.get_running_loop(),
+            identity,
+            self._server_name,
+            pairing_store=pairing_store,
+            allow_unencrypted=self._allow_unencrypted,
         )
-        logger.info("Sendspin WebSocket server listening on ws://%s:%d/sendspin", host, port)
+        self._unsubscribe = self._sendspin.add_event_listener(self._on_server_event)
+        # Clients are discovered by MDNSDiscovery, which also tells us when one
+        # announces itself again or goes away.
+        await self._sendspin.start_server(port=port, host=host, discover_clients=False)
+        logger.info(
+            "Sendspin server %s listening on ws://%s:%d/sendspin", self._sendspin.id, host, port
+        )
 
     async def stop(self) -> None:
-        """Stop the WebSocket server and all outbound connections."""
-        for task in list(self._outbound_tasks.values()):
+        """Stop the server and all outbound connections."""
+        for task in list(self._tasks):
             task.cancel()
-        if self._outbound_tasks:
-            await asyncio.gather(*self._outbound_tasks.values(), return_exceptions=True)
-        self._outbound_tasks.clear()
-        if self._ws_server is not None:
-            self._ws_server.close()
-            await self._ws_server.wait_closed()
+        if self._tasks:
+            await asyncio.gather(*self._tasks, return_exceptions=True)
+        for _group, unsubscribe in self._group_listeners.values():
+            unsubscribe()
+        self._group_listeners.clear()
+        if self._unsubscribe is not None:
+            self._unsubscribe()
+            self._unsubscribe = None
+        if self._sendspin is not None:
+            await self._sendspin.close()
 
     def connect_to_client(self, url: str, mdns_name: str | None = None) -> None:
         """Start a persistent server-initiated connection to a client URL.
 
         The connection is maintained automatically: if the client disconnects
-        it will be retried with exponential backoff (capped at
-        `_MAX_RECONNECT_BACKOFF`), unless the client sent client/goodbye with
-        reason 'another_server'.
+        it is retried with exponential backoff, unless the client said goodbye
+        for good (e.g. it moved to another server).
 
         Calling this again for a URL that is already managed retries it right
         away instead of waiting out the backoff, which is how a battery device
         announcing itself after deep sleep gets picked up inside its short
         awake window.
         """
-        if url in self._outbound_tasks:
-            wake = self._outbound_wake.get(url)
-            if wake is not None:
-                wake.set()
-            return  # already managing this URL
-        # Register as discovered immediately — before any handshake succeeds.
-        self._discovered_clients[url] = url
+        self._dial(url, ConnectionReason.DISCOVERY)
         if mdns_name:
             self._discovered_client_names[url] = mdns_name
-        task = asyncio.create_task(
-            self._outbound_connection_loop(url),
-            name=f"outbound-{url}",
-        )
-        self._outbound_tasks[url] = task
-        logger.info("Initiating server-initiated connection to %s", url)
 
     def reconnect_to_client(self, url: str, connection_reason: str = "discovery") -> None:
-        """Cancel any existing outbound task for url and start a fresh one.
+        """Dial `url` now, also after it stopped retrying.
 
-        Unlike connect_to_client, this always starts a new loop even if one
-        is already running — useful for forcing a retry after a permanent
-        disconnect (e.g. 'another_server' goodbye).
+        Useful for forcing a retry after a permanent disconnect (e.g. an
+        'another_server' goodbye). `connection_reason` "playback" asks the
+        client to switch to this server even if it is busy with another one.
         """
-        existing = self._outbound_tasks.pop(url, None)
-        if existing is not None:
-            existing.cancel()
-        # Ensure the URL is tracked as discovered before spawning the loop.
-        self._discovered_clients[url] = url
-        task = asyncio.get_event_loop().create_task(
-            self._outbound_connection_loop(url, connection_reason=connection_reason),
-            name=f"outbound-{url}",
+        reason = (
+            ConnectionReason.PLAYBACK
+            if connection_reason == "playback"
+            else ConnectionReason.DISCOVERY
         )
-        self._outbound_tasks[url] = task
-        logger.info("Force-reconnecting to %s", url)
+        self._dial(url, reason)
+
+    def _dial(self, url: str, reason: ConnectionReason) -> None:
+        self._discovered_clients[url] = url
+        if self._sendspin is None:
+            logger.warning("Cannot connect to %s: server not started", url)
+            return
+        self._sendspin.connect_to_client(
+            url, connection_reason=reason, retry_initial_connection=True
+        )
+        logger.info("Connecting to %s (%s)", url, reason.value)
 
     def disconnect_from_client(self, url: str) -> None:
-        """Cancel the outbound connection task for a URL (client disappeared from mDNS)."""
-        task = self._outbound_tasks.pop(url, None)
-        if task is not None:
-            task.cancel()
-            logger.info("Cancelled outbound connection to %s", url)
+        """Stop the outbound connection for a URL (client disappeared from mDNS)."""
+        if self._sendspin is not None:
+            self._sendspin.disconnect_from_client(url)
         self._discovered_clients.pop(url, None)
         self._discovered_client_names.pop(url, None)
-        self._url_to_client_id.pop(url, None)
 
     def get_discovered_urls(self) -> list[dict[str, str | None]]:
         """Return all tracked URLs with their known client_id and mDNS name (if any)."""
         return [
             {
                 "url": url,
-                "client_id": self._url_to_client_id.get(url),
+                "client_id": self.client_id_for_url(url),
                 "mdns_name": self._discovered_client_names.get(url),
             }
             for url in self._discovered_clients
         ]
-
-    async def send_stream_start_to_client(self, client_id: str) -> bool:
-        """Send stream/start to a currently-connected client.
-
-        Returns True if the client was found and the message was sent.
-        Returns False if no connected client with that ID exists.
-        """
-        client = self._clients.get(client_id)
-        if client is None:
-            return False
-        await self._send_stream_start(client)
-        return True
-
-    def _forget_connection(self, client: ClientState) -> None:
-        """Drop a closed connection, falling back to an older live one if there is one."""
-        remaining = [c for c in self._connections.get(client.client_id, []) if c is not client]
-        if remaining:
-            self._connections[client.client_id] = remaining
-            self._clients[client.client_id] = remaining[-1]
-            return
-        self._connections.pop(client.client_id, None)
-        self._clients.pop(client.client_id, None)
-        if self._registry is not None:
-            self._registry.client_disconnected(client.client_id)
-
-    def _served_by_endpoint(self, client_id: str) -> bool:
-        """Return True if an endpoint feed loop is responsible for this client's images."""
-        return (
-            self._registry is not None
-            and self._registry.effective_endpoint_id(client_id) is not None
-        )
-
-    async def _outbound_connection_loop(
-        self, url: str, connection_reason: str = "discovery"
-    ) -> None:
-        """Retry loop for a server-initiated outbound WebSocket connection."""
-        backoff = 1.0
-        wake = asyncio.Event()
-        self._outbound_wake[url] = wake
-        try:
-            while True:
-                try:
-                    async with websockets.connect(url) as websocket:
-                        logger.info("Server-initiated connection established to %s", url)
-                        backoff = 1.0  # reset on successful connect
-                        wake.clear()
-                        goodbye_reason = await self._handle_connection(
-                            websocket, connection_reason=connection_reason, source_url=url,
-                        )
-                    # Don't reconnect if client said goodbye with 'another_server'
-                    if goodbye_reason == "another_server":
-                        logger.debug(
-                            "Client at %s switched servers, not reconnecting", url
-                        )
-                        break
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:  # noqa: BLE001 - retry loop must survive any failure
-                    logger.debug("Outbound connection to %s failed: %s", url, exc)
-
-                logger.debug(
-                    "Reconnecting to %s in %.1fs", url, backoff
-                )
-                try:
-                    await asyncio.wait_for(wake.wait(), timeout=backoff)
-                except TimeoutError:
-                    backoff = min(backoff * 2, _MAX_RECONNECT_BACKOFF)
-                else:
-                    # The client was seen again (mDNS), so start over with a fresh backoff.
-                    logger.debug("Client at %s seen again, reconnecting now", url)
-                    backoff = 1.0
-                wake.clear()
-        except asyncio.CancelledError:
-            pass
-        finally:
-            # reconnect_to_client may already have replaced this loop with a new
-            # one, whose entries must be left alone.
-            if self._outbound_wake.get(url) is wake:
-                del self._outbound_wake[url]
-            if self._outbound_tasks.get(url) is asyncio.current_task():
-                del self._outbound_tasks[url]
-                # Clear client_id mapping when the outbound loop exits entirely.
-                self._url_to_client_id.pop(url, None)
 
     async def broadcast_image(
         self,
@@ -284,14 +283,13 @@ class SendspinImageServer:
     ) -> None:
         """Push an image to all connected artwork clients.
 
-        *force_e6_dither* applies dithering to every client regardless of what
-        format they negotiated. *dither_algo* selects the algorithm and
-        *dither_palette* selects the colour palette used.
-        Dithering always happens after per-client resizing.
+        *force_e6_dither* applies dithering to every client. *dither_algo*
+        selects the algorithm and *dither_palette* selects the colour palette
+        used. Dithering always happens after per-client resizing.
         """
         self._last_image[None] = image_bytes
         self._last_image_channel = channel
-        artwork_clients = [c for c in self._clients.values() if c.has_artwork and c.stream_started]
+        artwork_clients = [c for c in self.clients.values() if c.has_artwork and c.stream_started]
         if not artwork_clients:
             logger.debug("No artwork clients connected, image not sent")
             return
@@ -311,327 +309,179 @@ class SendspinImageServer:
         for client, result in zip(artwork_clients, results, strict=False):
             if isinstance(result, BaseException):
                 logger.warning("Failed to push image to %s: %s", client.client_id, result)
-            else:
+            elif result is not None:
                 self._last_image[client.client_id] = result
 
     # ------------------------------------------------------------------
-    # WebSocket handler
+    # aiosendspin events
     # ------------------------------------------------------------------
 
-    async def _serve_inbound(self, websocket: ServerConnection) -> None:
-        """Entry point for `websockets.serve`, which passes only the connection."""
-        await self._handle_connection(websocket)
+    def _on_server_event(self, server: SendspinServer, event: SendspinEvent) -> None:
+        if isinstance(event, ClientConnectedEvent):
+            client = server.get_client(event.client_id)
+            if client is not None:
+                self._track_connection(client)
+        elif isinstance(event, ClientDisconnectedEvent):
+            self._forget_connection(event.client_id)
+        elif isinstance(event, ClientRemovedEvent):
+            listener = self._group_listeners.pop(event.client_id, None)
+            if listener is not None:
+                listener[1]()
 
-    async def _handle_connection(
-        self,
-        websocket: Connection,
-        connection_reason: str = "discovery",
-        source_url: str | None = None,
-    ) -> str | None:
-        """Handle a WebSocket connection from a Sendspin client.
-
-        Works for both inbound (client-initiated) and outbound (server-initiated)
-        connections.  Returns the client/goodbye reason string if the client
-        disconnected gracefully, otherwise None.
-
-        *source_url* is the URL we dialled for outbound connections; when provided
-        the real client_id is stored in ``_url_to_client_id`` after a successful
-        client/hello so that discovered-but-disconnected entries can be matched
-        back to their last-known identity.
-        """
-        # For inbound connections the path is available on the request; for
-        # outbound connections we already connected to the correct path.
-        request = getattr(websocket, "request", None)
-        if request is not None:
-            path = request.path
-            if not path.rstrip("/").endswith("/sendspin"):
-                logger.debug("Rejecting connection to unknown path: %s", path)
-                await websocket.close(1008, "Unknown path")
-                return None
-
-        client: ClientState | None = None
-        goodbye_reason: str | None = None
-
-        try:
-            # Step 1: receive client/hello
-            raw = await websocket.recv()
-            if not isinstance(raw, str):
-                logger.warning("Expected text message for client/hello, got binary")
-                return None
-            msg = json.loads(raw)
-            if msg.get("type") != "client/hello":
-                logger.warning("Expected client/hello, got %s", msg.get("type"))
-                return None
-
-            client = self._parse_client_hello(msg, websocket)
-            # Record the real client_id for this URL so that registry.client_info()
-            # can match the discovered entry to its known identity.
-            if source_url is not None:
-                self._url_to_client_id[source_url] = client.client_id
-            self._connections.setdefault(client.client_id, []).append(client)
-            self._clients[client.client_id] = client
-            # Persist the last-known URL so offline clients can be force-reconnected.
-            if self._registry is not None:
-                self._registry.ensure_client(client.client_id, name=client.name, url=source_url)
-            logger.info(
-                "Client connected: %s (%s) roles=%s connection_reason=%s",
-                client.name,
-                client.client_id,
-                client.active_roles,
-                connection_reason,
+    def _on_group_event(self, group: SendspinGroup, event: GroupEvent) -> None:
+        if isinstance(event, ArtworkStreamStartedEvent):
+            # A client that declares its channels in its hello starts its
+            # stream while its roles are still being attached, so look at it
+            # once that is done.
+            asyncio.get_running_loop().call_soon(
+                self._on_artwork_stream_started, group, event.role
             )
 
-            # Step 2: send server/hello
-            await self._send_server_hello(client, connection_reason=connection_reason)
-
-            # Step 3: send stream/start
-            await self._send_stream_start(client)
-            client.stream_started = True
-            if self._registry is not None:
-                self._registry.client_connected(client.client_id)
-
-            # Step 3b: immediately send last known image to new artwork clients.
-            # Clients fed by an endpoint are skipped: the feed loop pushes to them
-            # as soon as they connect, and a frame that sleeps after its first
-            # image would otherwise refresh with this stale one.
-            if (
-                client.has_artwork
-                and self.last_image is not None
-                and not self._served_by_endpoint(client.client_id)
-            ):
-                try:
-                    await push_image_to_client(client, self.last_image, self._last_image_channel)
-                except Exception as exc:  # noqa: BLE001 - a bad client must not break handshake
-                    logger.warning(
-                        "Failed to push cached image to new client %s: %s",
-                        client.client_id,
-                        exc,
-                    )
-
-            # Step 4: send server/state for metadata clients
-            await self._send_server_state(client)
-
-            # Step 5: message loop
-            async for raw_msg in websocket:
-                if isinstance(raw_msg, str):
-                    parsed = json.loads(raw_msg)
-                    if parsed.get("type") == "client/goodbye":
-                        goodbye_reason = parsed.get("payload", {}).get("reason")
-                        logger.debug(
-                            "Client %s said goodbye: %s",
-                            client.client_id,
-                            goodbye_reason,
-                        )
-                        break
-                    await self._handle_text_message(client, parsed)
-                # binary messages from clients are not expected; ignore
-
-        except websockets.exceptions.ConnectionClosedOK:
-            pass
-        except websockets.exceptions.ConnectionClosedError as exc:
-            logger.debug("Client connection closed with error: %s", exc)
-        except Exception:
-            logger.exception("Unhandled error in connection handler")
-        finally:
-            if client is not None:
-                self._forget_connection(client)
-                logger.info("Client disconnected: %s (%s)", client.name, client.client_id)
-
-        return goodbye_reason
-
-    # ------------------------------------------------------------------
-    # Message parsing helpers
-    # ------------------------------------------------------------------
-
-    def _parse_client_hello(
-        self, msg: dict[str, Any], websocket: Connection
-    ) -> ClientState:
-        """Parse a client/hello message and return a ClientState."""
-        payload = msg.get("payload", {})
-        client_id: str = payload.get("client_id", str(uuid.uuid4()))
-        name: str = payload.get("name", "Unknown Client")
-        supported: list[str] = payload.get("supported_roles", [])
-        logger.info("Client %s supported_roles=%s", client_id, supported)
-
-        # Activate the first supported version of each role family we implement
-        active_roles: list[str] = []
-        seen_families: set[str] = set()
-        for role in supported:
-            family = role.split("@")[0]
-            if role in SUPPORTED_ROLES and family not in seen_families:
-                active_roles.append(role)
-                seen_families.add(family)
-
-        # Parse artwork channel preferences
-        artwork_channels: list[ArtworkChannel] = []
-        if ROLE_ARTWORK in active_roles:
-            # Accept both the versioned key and the legacy key used by older clients
-            aw_support = payload.get("artwork@v1_support") or payload.get("artwork_support", {})
-            for idx, ch_cfg in enumerate(aw_support.get("channels", [])):
-                media_width = ch_cfg.get("media_width")
-                media_height = ch_cfg.get("media_height")
-                artwork_channels.append(
-                    ArtworkChannel(
-                        source=ch_cfg.get("source", "album"),
-                        format=ch_cfg.get("format", "jpeg"),
-                        media_width=media_width,
-                        media_height=media_height,
-                        channel_index=idx,
-                    )
-                )
-            if not artwork_channels:
-                artwork_channels = [ArtworkChannel()]
-            for ch in artwork_channels:
-                size_str = (
-                    f"{ch.media_width}x{ch.media_height}"
-                    if ch.media_width and ch.media_height
-                    else "unspecified"
-                )
-                logger.info(
-                    "Client %s artwork channel %d: source=%s format=%s requested=%s",
-                    client_id, ch.channel_index, ch.source, ch.format, size_str,
-                )
-
-        return ClientState(
-            client_id=client_id,
-            name=name,
-            websocket=websocket,
-            active_roles=active_roles,
-            artwork_channels=artwork_channels,
-        )
-
-    # ------------------------------------------------------------------
-    # Outbound messages
-    # ------------------------------------------------------------------
-
-    async def _send(self, client: ClientState, payload: dict[str, Any]) -> None:
-        """Send a JSON text message to a client."""
-        await client.websocket.send(json.dumps(payload))
-
-    async def _send_server_hello(
-        self, client: ClientState, connection_reason: str = "discovery"
-    ) -> None:
-        await self._send(
-            client,
-            {
-                "type": "server/hello",
-                "payload": {
-                    "server_id": self._server_id,
-                    "name": self._server_name,
-                    "version": SERVER_VERSION,
-                    "active_roles": client.active_roles,
-                    "connection_reason": connection_reason,
-                },
-            },
-        )
-
-    async def _send_stream_start(self, client: ClientState) -> None:
-        payload: dict[str, Any] = {}
-
-        if client.has_artwork and client.artwork_channels:
-            channels = []
-            for ch in client.artwork_channels:
-                # Report the wire format: e6-dithered outputs jpeg
-                wire_format = "jpeg" if ch.wants_e6_dither else ch.format
-                ch_entry: dict[str, Any] = {
-                    "source": ch.source,
-                    "format": wire_format,
-                }
-                if ch.media_width is not None:
-                    ch_entry["width"] = ch.media_width
-                if ch.media_height is not None:
-                    ch_entry["height"] = ch.media_height
-                channels.append(ch_entry)
-            payload["artwork"] = {"channels": channels}
-
-        if payload:
-            await self._send(client, {"type": "stream/start", "payload": payload})
-
-    async def _send_server_state(self, client: ClientState) -> None:
-        if not client.has_metadata:
+    def _track_connection(self, client: SendspinClient) -> None:
+        """Set up state for a client's current connection, once per connection."""
+        client_id = client.client_id
+        connection = client.connection
+        if connection is None:
             return
-        await self._send(
-            client,
-            {
-                "type": "server/state",
-                "payload": {
-                    "metadata": {
-                        "timestamp": server_time_us(),
-                        "title": "Image Server",
-                        "artist": None,
-                        "album": None,
-                        "progress": {
-                            "track_progress": 0,
-                            "track_duration": 0,
-                            "playback_speed": 1000,
-                        },
-                    },
-                },
-            },
+        self._listen_to_group(client)
+        if self._connections.get(client_id) is connection:
+            return
+        self._connections[client_id] = connection
+        self._announced.discard(client_id)
+        self._clients[client_id] = self._new_state(client, None)
+        logger.info(
+            "Client connected: %s (%s)%s",
+            client.name,
+            client_id,
+            "" if connection.is_encrypted else " [unencrypted]",
         )
 
-    # ------------------------------------------------------------------
-    # Inbound message dispatch
-    # ------------------------------------------------------------------
+        if self._registry is not None and self._sendspin is not None:
+            self._registry.ensure_client(
+                client_id, name=client.name, url=self._sendspin.get_client_url(client_id)
+            )
 
-    async def _handle_text_message(
-        self, client: ClientState, msg: dict[str, Any]
-    ) -> None:
-        msg_type: str = msg.get("type", "")
-        payload: dict[str, Any] = msg.get("payload", {})
-
-        if msg_type == "client/time":
-            await self._handle_client_time(client, payload)
-        elif msg_type == "stream/request-format":
-            await self._handle_stream_request_format(client, payload)
-        else:
-            logger.debug("Unhandled message type from %s: %s", client.client_id, msg_type)
-
-    async def _handle_client_time(
-        self, client: ClientState, payload: dict[str, Any]
-    ) -> None:
-        client_transmitted: int = payload.get("client_transmitted", 0)
-        server_received = server_time_us()
-        server_transmitted = server_time_us()
-        await self._send(
-            client,
-            {
-                "type": "server/time",
-                "payload": {
-                    "client_transmitted": client_transmitted,
-                    "server_received": server_received,
-                    "server_transmitted": server_transmitted,
-                },
-            },
-        )
-
-    async def _handle_stream_request_format(
-        self, client: ClientState, payload: dict[str, Any]
-    ) -> None:
-        aw_req = payload.get("artwork")
-        if aw_req and client.has_artwork:
-            ch_idx: int = int(aw_req.get("channel", 0))
-            if 0 <= ch_idx < len(client.artwork_channels):
-                ch = client.artwork_channels[ch_idx]
-                if "source" in aw_req:
-                    ch.source = aw_req["source"]
-                if "format" in aw_req:
-                    ch.format = aw_req["format"]
-                if "media_width" in aw_req:
-                    ch.media_width = int(aw_req["media_width"])
-                if "media_height" in aw_req:
-                    ch.media_height = int(aw_req["media_height"])
-
-        await self._send_stream_start(client)
-
-        # Per spec: after stream/start in response to stream/request-format,
-        # send an immediate artwork update
-        if client.has_artwork and self.last_image is not None:
-            try:
-                await push_image_to_client(client, self.last_image, self._last_image_channel)
-            except Exception as exc:  # noqa: BLE001 - a bad client must not break handshake
-                logger.warning(
-                    "Failed to push cached image after format request for %s: %s",
-                    client.client_id,
-                    exc,
+        metadata = client.group.group_role("metadata")
+        if isinstance(metadata, MetadataGroupRole) and metadata.metadata is None:
+            metadata.set_metadata(
+                Metadata(
+                    title="Image Server", track_progress=0, track_duration=0, playback_speed=1000
                 )
+            )
+
+        # Only encrypted clients have an identity worth approving; an
+        # unencrypted one can claim any id.
+        if connection.is_encrypted and not client.is_paired:
+            if not client.info.unpaired_access.enabled:
+                logger.warning(
+                    "Client %s (%s) only accepts paired servers and this server cannot "
+                    "pair yet; enable unpaired access on the device to send it images",
+                    client.name,
+                    client_id,
+                )
+            elif self._trust_unpaired:
+                self._spawn(self._approve_unpaired(client_id))
+            else:
+                logger.warning(
+                    "Client %s (%s) is not approved for unpaired access and "
+                    "--no-trust-unpaired is set, so it gets no images",
+                    client.name,
+                    client_id,
+                )
+
+    async def _approve_unpaired(self, client_id: str) -> None:
+        if self._sendspin is None:
+            return
+        if await self._sendspin.pairing_store.trusted_unpaired(client_id) is None:
+            logger.info("Approving %s for unpaired access", client_id)
+            await self._sendspin.trust_unpaired(client_id)
+
+    def _listen_to_group(self, client: SendspinClient) -> None:
+        group = client.group
+        listener = self._group_listeners.get(client.client_id)
+        if listener is not None:
+            if listener[0] is group:
+                return
+            listener[1]()
+        self._group_listeners[client.client_id] = (
+            group,
+            group.add_event_listener(self._on_group_event),
+        )
+
+    def _new_state(
+        self, client: SendspinClient, artwork: ArtworkRoleProtocol | None
+    ) -> ClientState:
+        assert self._sendspin is not None
+        return ClientState(
+            client_id=client.client_id,
+            name=client.name,
+            active_roles=client.active_role_ids,
+            artwork=artwork,
+            clock=self._sendspin.clock.now_us,
+        )
+
+    def _on_artwork_stream_started(self, group: SendspinGroup, role: ArtworkRoleProtocol) -> None:
+        if not role.get_channel_configs():
+            # Joined the group before declaring any channels.
+            return
+        target: object = role
+        client = next(
+            (
+                c
+                for c in group.clients
+                if any(r is target for r in c.roles_by_family("artwork"))
+            ),
+            None,
+        )
+        if client is None:
+            return
+        client_id = client.client_id
+        self._track_connection(client)
+        # A fresh state per stream: the feed loops serve a client they have not
+        # seen before right away.
+        state = self._new_state(client, role)
+        self._clients[client_id] = state
+        logger.info(
+            "Artwork stream started for %s: %s",
+            client_id,
+            [(ch.format, ch.width, ch.height) for ch in state.artwork_channels],
+        )
+
+        if client_id not in self._announced:
+            self._announced.add(client_id)
+            if self._registry is not None:
+                self._registry.client_connected(client_id)
+
+        # Push the cached image so a newly connected client shows something
+        # right away, unless an endpoint feeds it: the feed loop does that
+        # with the client's own dither settings.
+        last_image = self._last_image.get(None)
+        if last_image is not None and not self._served_by_endpoint(client_id):
+            self._spawn(self._push_cached(state, last_image))
+
+    async def _push_cached(self, state: ClientState, image_bytes: bytes) -> None:
+        try:
+            await push_image_to_client(state, image_bytes, self._last_image_channel)
+        except Exception:
+            logger.exception("Failed to push cached image to %s", state.client_id)
+
+    def _forget_connection(self, client_id: str) -> None:
+        self._connections.pop(client_id, None)
+        self._announced.discard(client_id)
+        if self._clients.pop(client_id, None) is None:
+            return
+        logger.info("Client disconnected: %s", client_id)
+        if self._registry is not None:
+            self._registry.client_disconnected(client_id)
+
+    def _served_by_endpoint(self, client_id: str) -> bool:
+        """Return True if an endpoint's feed loop is responsible for this client."""
+        return (
+            self._registry is not None
+            and self._registry.effective_endpoint_id(client_id) is not None
+        )
+
+    def _spawn(self, coro: Coroutine[Any, Any, None]) -> None:
+        task = asyncio.get_running_loop().create_task(coro)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
