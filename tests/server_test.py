@@ -123,6 +123,30 @@ async def _until(predicate) -> None:
             await asyncio.sleep(0.01)
 
 
+async def _next_stream_start(ws: aiohttp.ClientWebSocketResponse) -> None:
+    async with asyncio.timeout(TIMEOUT):
+        async for message in ws:
+            is_text = message.type == aiohttp.WSMsgType.TEXT
+            if is_text and json.loads(message.data)["type"] == "stream/start":
+                return
+
+
+async def _messages_until_quiet(ws: aiohttp.ClientWebSocketResponse) -> list[str]:
+    """Return what the server sends next: message types, with "image" for a binary one."""
+    seen: list[str] = []
+    while True:
+        try:
+            message = await ws.receive(timeout=0.5)
+        except TimeoutError:
+            return seen
+        if message.type == aiohttp.WSMsgType.BINARY:
+            seen.append("image")
+        elif message.type == aiohttp.WSMsgType.TEXT:
+            seen.append(json.loads(message.data)["type"])
+        else:
+            return seen
+
+
 class TestArtworkDelivery:
     async def test_connecting_client_gets_the_cached_image_at_its_size(self, running):
         server, url = running
@@ -206,6 +230,26 @@ class TestLegacyClients:
         assert image.format == "JPEG"
         assert image.size == (40, 30)
         server.registry.client_connected.assert_called_once_with("old-frame")
+
+    async def test_stream_starts_again_once_the_client_reports_its_state(self, running):
+        # sendspin-cpp forgets a stream/start that reaches it before it has
+        # dropped the server it was on, and only then sends its client/state.
+        server, url = running
+        await server.broadcast_image(_image("red"))
+
+        async with aiohttp.ClientSession() as session, session.ws_connect(url) as ws:
+            await ws.send_str(json.dumps(LEGACY_HELLO))
+            await _next_stream_start(ws)
+            await ws.send_str(json.dumps({"type": "client/state", "payload": {}}))
+            after_state = await _messages_until_quiet(ws)
+
+            await ws.send_str(json.dumps({"type": "client/state", "payload": {}}))
+            after_second_state = await _messages_until_quiet(ws)
+
+        assert "stream/start" in after_state
+        assert "image" in after_state[after_state.index("stream/start") :]
+        # Only the first state restarts the stream: each restart repaints the display.
+        assert "stream/start" not in after_second_state
 
     async def test_cleartext_client_is_refused_when_not_allowed(self, tmp_path):
         server = SendspinImageServer("Test Server", tmp_path, allow_unencrypted=False)
