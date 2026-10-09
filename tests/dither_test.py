@@ -340,6 +340,16 @@ class TestDitherToPilNoneAlgo:
         result = dither_to_pil(solid_jpeg, "none", "none")
         assert result.size == (100, 100)
 
+    def test_no_dither_leaves_colours_as_they_are(self):
+        source = Image.new("RGB", (8, 8), (180, 90, 40))
+        source.putpixel((0, 0), (20, 60, 200))
+        buf = io.BytesIO()
+        source.save(buf, format="PNG")
+
+        result = dither_to_pil(buf.getvalue(), "none", "e6")
+
+        assert np.array_equal(np.array(result), np.array(source))
+
 
 class TestDitherToPilWithPalette:
     """Tests for dither_to_pil with palette='e6'."""

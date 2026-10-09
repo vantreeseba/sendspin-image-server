@@ -4,7 +4,8 @@ Supported algorithms (select via the *algo* argument):
 
   floyd-steinberg               — PIL's built-in Floyd-Steinberg (C implementation,
                                   mirrors Waveshare's official getbuffer() approach)
-  floyd-steinberg-serpentine    — alias for floyd-steinberg
+  floyd-steinberg-serpentine    — Floyd-Steinberg scanning alternate rows in opposite
+                                  directions (pure Python, Lab LUT)
   atkinson                      — Bill Atkinson's 3/4-error diffusion (Lab LUT)
   ordered                       — 8×8 Bayer ordered/threshold dithering (Lab LUT)
   none                          — no dithering at all (pure passthrough, no preprocessing)
@@ -422,9 +423,11 @@ def dither_to_pil(
     """
     src = Image.open(io.BytesIO(image_bytes))
     src.load()
-    img = _preprocess(src)
+    if algo == "none":
+        return src.convert("RGB")
 
-    if palette == "none" or algo == "none":
+    img = _preprocess(src)
+    if palette == "none":
         return img
 
     if algo == "floyd-steinberg":
