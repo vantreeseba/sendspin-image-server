@@ -106,12 +106,6 @@ async def run(  # noqa: C901, PLR0913, PLR0915
 
     registry_ref: list[Any] = [None]  # forward reference filled after registry is created
 
-    discovery = MDNSDiscovery(
-        on_client_added=_on_client_added,
-        on_client_removed=_on_client_removed,
-    )
-    await discovery.start()
-
     # ------------------------------------------------------------------
     # Database
     # ------------------------------------------------------------------
@@ -148,14 +142,23 @@ async def run(  # noqa: C901, PLR0913, PLR0915
     # Wire the registry forward reference used by the mDNS removed callback.
     registry_ref[0] = registry
 
+    # Give the server a back-reference to the registry so it can persist
+    # each client's last-known WebSocket URL on successful hello handshake,
+    # and tell which URLs belong to locked clients.
+    server.registry = registry
+
     # Auto-connect any locked clients whose last-known URL was restored.
     for _cid, _url in registry.locked_clients_with_urls():
         logger.info("Auto-connecting locked client %s → %s", _cid, _url)
         server.connect_to_client(_url)
 
-    # Give the server a back-reference to the registry so it can persist
-    # each client's last-known WebSocket URL on successful hello handshake.
-    server.registry = registry
+    # Discovery starts once the locks are restored, so a locked client that
+    # announces itself straight away is force connected too.
+    discovery = MDNSDiscovery(
+        on_client_added=_on_client_added,
+        on_client_removed=_on_client_removed,
+    )
+    await discovery.start()
 
     # ------------------------------------------------------------------
     # HTTP handlers
@@ -678,7 +681,7 @@ async def run(  # noqa: C901, PLR0913, PLR0915
             if entry and entry.get("status") != "connected":
                 url = entry.get("discovered_url")
                 if url:
-                    server.reconnect_to_client(url, connection_reason="lock")
+                    server.connect_to_client(url)
         return web.Response(status=204)
 
     async def api_delete_client(request: web.Request) -> web.Response:

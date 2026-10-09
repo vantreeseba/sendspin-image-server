@@ -261,10 +261,22 @@ class SendspinImageServer:
         away instead of waiting out the backoff, which is how a battery device
         announcing itself after deep sleep gets picked up inside its short
         awake window.
+
+        A locked client is asked to switch to this server even if another one
+        already has it.
         """
-        self._dial(url, ConnectionReason.DISCOVERY)
+        reason = (
+            ConnectionReason.PLAYBACK if self._is_locked_url(url) else ConnectionReason.DISCOVERY
+        )
+        self._dial(url, reason)
         if mdns_name:
             self._discovered_client_names[url] = mdns_name
+
+    def _is_locked_url(self, url: str) -> bool:
+        """Whether `url` is the last-known address of a locked client."""
+        if self._registry is None:
+            return False
+        return any(url == locked for _, locked in self._registry.locked_clients_with_urls())
 
     def reconnect_to_client(self, url: str, connection_reason: str = "discovery") -> None:
         """Dial `url` now, also after it stopped retrying.
