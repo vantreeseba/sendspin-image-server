@@ -521,3 +521,60 @@ class TestErrorHandling:
             n_colors = len(PALETTE_RGB[palette_name])
             assert lut.min() >= 0
             assert lut.max() < n_colors
+
+
+# ===== SECTION: Ink-matched palette ===
+
+
+class TestInkMatchedPalette:
+    """e6ink picks inks by what the panel really shows, and still emits pure colours."""
+
+    ALGOS = ("floyd-steinberg", "floyd-steinberg-serpentine", "atkinson", "ordered")
+
+    @staticmethod
+    def _flat(color: tuple[int, int, int]) -> bytes:
+        buf = io.BytesIO()
+        Image.new("RGB", (32, 32), color).save(buf, format="PNG")
+        return buf.getvalue()
+
+    @staticmethod
+    def _gradient() -> bytes:
+        ramp = np.linspace(0, 255, 64, dtype=np.uint8)
+        across, down = np.tile(ramp, (64, 1)), np.tile(ramp[:, None], (1, 64))
+        arr = np.stack([across, down, 255 - across], -1)
+        buf = io.BytesIO()
+        Image.fromarray(arr).save(buf, format="PNG")
+        return buf.getvalue()
+
+    @staticmethod
+    def _share(img: Image.Image, color: tuple[int, int, int]) -> float:
+        return float((np.array(img) == color).all(-1).mean())
+
+    def test_emits_the_same_colours_as_e6(self):
+        assert PALETTE_RGB["e6ink"] == E6_PALETTE_RGB
+        assert "e6ink" in dither.DITHER_PALETTES
+        assert PALETTE_LABELS["e6ink"]
+
+    @pytest.mark.parametrize("algo", ALGOS)
+    def test_output_holds_only_pure_e6_colours(self, algo):
+        out = dither_to_pil(self._gradient(), algo, "e6ink")
+
+        assert {tuple(px) for px in np.array(out).reshape(-1, 3).tolist()} <= E6_PALETTE_SET
+
+    @pytest.mark.parametrize("algo", ["floyd-steinberg", "floyd-steinberg-serpentine", "atkinson"])
+    def test_the_panels_own_white_is_shown_as_solid_white(self, algo):
+        # Near-neutral, so the saturation boost leaves it alone.
+        panel_white = dither.INK_MATCH_RGB["e6ink"][E6_PALETTE_RGB.index((255, 255, 255))]
+
+        matched = dither_to_pil(self._flat(panel_white), algo, "e6ink")
+        pure = dither_to_pil(self._flat(panel_white), algo, "e6")
+
+        assert self._share(matched, (255, 255, 255)) == 1.0
+        assert self._share(pure, (255, 255, 255)) < 0.95
+
+    def test_ink_colours_sit_halfway_between_pure_and_measured(self):
+        inks = dict(zip(E6_PALETTE_RGB, dither.INK_MATCH_RGB["e6ink"], strict=True))
+
+        assert inks[(0, 0, 0)] == (0, 0, 0)
+        assert inks[(255, 255, 255)] == (208, 209, 210)
+        assert inks[(0, 255, 0)] == (29, 173, 35)
