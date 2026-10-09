@@ -14,6 +14,7 @@ Supported palettes:
   none  — no palette restriction (full color, dithering disabled)
   bw    — black and white (binary; two-color)
   e6    — Waveshare Spectra E6 six-color palette (Black, White, Green, Blue, Red, Yellow)
+  e6ink — the same six colors, chosen by what the Spectra E6 inks look like on the panel
   e7    — ACeP seven-color palette (the six above plus Orange)
 
 Floyd-Steinberg uses PIL's quantize() — the same method as Waveshare's official Python
@@ -96,8 +97,37 @@ for _act_path in sorted(_TABLES_DIR.glob("*.act")):
     except Exception as _e:  # noqa: BLE001 - a bad palette file must not break import
         logger.warning("Failed to load palette %r from %s: %s", _key, _act_path, _e)
 
+# What the Spectra 6 inks look like on the panel, keyed by the pure colour sent
+# for each. Measured for Pimoroni's driver of the same panel (inky_e673.py).
+_E6_MEASURED_RGB: Final[dict[tuple[int, int, int], tuple[int, int, int]]] = {
+    (0, 0, 0):       (0, 0, 0),
+    (255, 255, 255): (161, 164, 165),
+    (255, 255, 0):   (208, 190, 71),
+    (255, 0, 0):     (156, 72, 75),
+    (0, 0, 255):     (61, 59, 94),
+    (0, 255, 0):     (58, 91, 70),
+}
+
+
+def _halfway(a: tuple[int, int, int], b: tuple[int, int, int]) -> tuple[int, int, int]:
+    return (a[0] + b[0]) // 2, (a[1] + b[1]) // 2, (a[2] + b[2]) // 2
+
+
+# "e6ink" sends the same six colours as "e6", but chooses between them (and
+# diffuses error) as if each ink were halfway between its pure colour and what
+# the panel really shows. Dithering against the pure colours expects inks far
+# more vivid than the real ones, and over-corrects into speckle.
+_LOADED_PALETTES["e6ink"] = list(_LOADED_PALETTES["e6"])
+_LOADED_LABELS["e6ink"]   = "E-Paper 6-Color (Spectra 6, ink-matched)"
+
+# Palette key → the colour each of its inks is taken to be while dithering,
+# in the palette's own order. Palettes not listed are matched as they are sent.
+INK_MATCH_RGB: Final[dict[str, list[tuple[int, int, int]]]] = {
+    "e6ink": [_halfway(pure, _E6_MEASURED_RGB[pure]) for pure in _LOADED_PALETTES["e6"]],
+}
+
 # "none" is always available — no quantisation, full colour passthrough.
-DitheringPalette = Literal["none", "bw", "bwr", "bwy", "4color", "e6", "e7"]
+DitheringPalette = Literal["none", "bw", "bwr", "bwy", "4color", "e6", "e6ink", "e7"]
 DITHER_PALETTES: Final[tuple[str, ...]] = ("none", *_LOADED_PALETTES)
 
 PALETTE_LABELS: Final[dict[str, str]] = {
@@ -111,6 +141,10 @@ E6_PALETTE_RGB: Final[list[tuple[int, int, int]]] = _LOADED_PALETTES["e6"]
 E7_PALETTE_RGB: Final[list[tuple[int, int, int]]] = _LOADED_PALETTES["e7"]
 
 PALETTE_RGB: Final[dict[str, list[tuple[int, int, int]]]] = dict(_LOADED_PALETTES)
+
+_MATCH_RGB: Final[dict[str, list[tuple[int, int, int]]]] = {
+    key: INK_MATCH_RGB.get(key, rgb) for key, rgb in PALETTE_RGB.items()
+}
 
 PALETTE_SETS: Final[dict[str, frozenset[tuple[int, int, int]]]] = {
     key: frozenset(rgb) for key, rgb in PALETTE_RGB.items()
@@ -203,17 +237,21 @@ def _build_lut(palette_rgb: list[tuple[int, int, int]]) -> np.ndarray:
 
 
 _LUTS: Final[dict[str, np.ndarray]] = {
-    name: _build_lut(rgb) for name, rgb in PALETTE_RGB.items()
+    name: _build_lut(rgb) for name, rgb in _MATCH_RGB.items()
 }
 _PAL_NPS: Final[dict[str, np.ndarray]] = {
     name: np.array(rgb, dtype=np.uint8) for name, rgb in PALETTE_RGB.items()
 }
 
 
+def _nearest_index(r: int, g: int, b: int, palette: DitheringPalette) -> int:
+    """Return the index of the ink closest to (r, g, b) via Lab-space LUT."""
+    return int(_LUTS[palette][r >> _LUT_SHIFT, g >> _LUT_SHIFT, b >> _LUT_SHIFT])
+
+
 def _nearest(r: int, g: int, b: int, palette: DitheringPalette) -> tuple[int, int, int]:
-    """Return the closest palette colour to (r, g, b) via Lab-space LUT."""
-    idx = int(_LUTS[palette][r >> _LUT_SHIFT, g >> _LUT_SHIFT, b >> _LUT_SHIFT])
-    rgb = _PAL_NPS[palette][idx]
+    """Return the palette colour sent for the ink closest to (r, g, b)."""
+    rgb = _PAL_NPS[palette][_nearest_index(r, g, b, palette)]
     return int(rgb[0]), int(rgb[1]), int(rgb[2])
 
 
@@ -232,7 +270,7 @@ def _build_palette_image(palette_rgb: list[tuple[int, int, int]]) -> Image.Image
 
 
 _PALETTE_IMAGES: Final[dict[str, Image.Image]] = {
-    name: _build_palette_image(rgb) for name, rgb in PALETTE_RGB.items()
+    name: _build_palette_image(rgb) for name, rgb in _MATCH_RGB.items()
 }
 
 
@@ -252,6 +290,8 @@ def _floyd_steinberg(img: Image.Image, palette: DitheringPalette) -> Image.Image
     quantized = img.quantize(
         palette=_PALETTE_IMAGES[palette], dither=Image.Dither.FLOYDSTEINBERG
     )
+    # Matched against the inks' dithering colours, shown in the colours sent.
+    quantized.putpalette([channel for rgb in PALETTE_RGB[palette] for channel in rgb])
     return quantized.convert("RGB")
 
 
@@ -272,6 +312,7 @@ def _serpentine_floyd_steinberg(img: Image.Image, palette: DitheringPalette) -> 
             buf[o + 2] = max(0, min(255, buf[o + 2] + eb))
 
     out = bytearray(w * h * 3)
+    sent, matched = PALETTE_RGB[palette], _MATCH_RGB[palette]
 
     for y in range(h):
         xs = range(w) if y % 2 == 0 else range(w - 1, -1, -1)
@@ -279,8 +320,9 @@ def _serpentine_floyd_steinberg(img: Image.Image, palette: DitheringPalette) -> 
         for x in xs:
             o = (y * w + x) * 3
             or_, og, ob = buf[o], buf[o + 1], buf[o + 2]
-            pr, pg, pb = _nearest(or_, og, ob, palette)
-            out[o], out[o + 1], out[o + 2] = pr, pg, pb
+            ink = _nearest_index(or_, og, ob, palette)
+            out[o], out[o + 1], out[o + 2] = sent[ink]
+            pr, pg, pb = matched[ink]
             er, eg, eb = or_ - pr, og - pg, ob - pb
             add_err(x + forward, y,      (er * 7) >> 4, (eg * 7) >> 4, (eb * 7) >> 4)
             add_err(x - forward, y + 1,  (er * 3) >> 4, (eg * 3) >> 4, (eb * 3) >> 4)
@@ -307,13 +349,15 @@ def _atkinson(img: Image.Image, palette: DitheringPalette) -> Image.Image:
             buf[o + 2] = max(0, min(255, buf[o + 2] + eb))
 
     out = bytearray(w * h * 3)
+    sent, matched = PALETTE_RGB[palette], _MATCH_RGB[palette]
 
     for y in range(h):
         for x in range(w):
             cr, cg, cb = get(x, y)
-            pr, pg, pb = _nearest(cr, cg, cb, palette)
+            ink = _nearest_index(cr, cg, cb, palette)
             o = (y * w + x) * 3
-            out[o], out[o + 1], out[o + 2] = pr, pg, pb
+            out[o], out[o + 1], out[o + 2] = sent[ink]
+            pr, pg, pb = matched[ink]
             er, eg, eb = (cr - pr) >> 3, (cg - pg) >> 3, (cb - pb) >> 3
             add_err(x + 1, y,     er, eg, eb)
             add_err(x + 2, y,     er, eg, eb)

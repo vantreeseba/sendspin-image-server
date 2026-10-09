@@ -184,6 +184,7 @@ The server applies a small contrast and saturation boost before dithering (1.2×
 | `bwy`          | Black, white and yellow                                |
 | `4color`       | Black, white, red and yellow                           |
 | `e6`           | 6-colour Spectra 6 e-Paper (default)                   |
+| `e6ink`        | The same six colours, chosen by how the inks really look |
 | `e7`           | 7-colour ACeP e-Paper (the six below plus orange)      |
 
 **E-Paper 6-Color palette:**
