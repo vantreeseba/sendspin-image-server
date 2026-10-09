@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v2.2.0 (2026-10-09)
+
+### Bug Fixes
+
+- **server**: Honour a preset's interval in the feed loop
+  ([`cb35218`](https://github.com/vantreeseba/sendspin-image-server/commit/cb3521868f853d819473acdeefd3e97c8667f3af))
+
+### Features
+
+- **ui**: Show when the preview image was sent
+  ([`3b1d4f5`](https://github.com/vantreeseba/sendspin-image-server/commit/3b1d4f5e96211ba2a09df7adbb4a4f9d10bd3fed))
+
+
 ## v2.1.1 (2026-10-09)
 
 
