@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v2.0.1 (2026-10-09)
+
+### Bug Fixes
+
+- **endpoints**: Browse home assistant media without a media player
+  ([`1ccf563`](https://github.com/vantreeseba/sendspin-image-server/commit/1ccf5632789d78a92f0012178ec0fa4303a9590c))
+
+
 ## v2.0.0 (2026-10-09)
 
 ### Bug Fixes
