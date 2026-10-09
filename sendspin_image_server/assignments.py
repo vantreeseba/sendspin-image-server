@@ -618,8 +618,8 @@ class ClientAssignmentManager:
 
     def _effective_interval(self, client_id: str) -> float:
         """Return the interval to use for a client, falling back to server default."""
-        override = self._client_interval.get(client_id, 0)
-        return override if override > 0 else self._interval
+        interval = self.client_interval(client_id)
+        return interval if interval > 0 else self._interval
 
 
 # ---- Module-level helpers ----

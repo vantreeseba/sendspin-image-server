@@ -424,6 +424,22 @@ class TestFeedLoop:
         assert pushes.get_nowait() is client
         assert pushes.empty()
 
+    async def test_client_on_a_preset_waits_for_the_presets_interval(self, pushes, endpoint):
+        client = _feed_client()
+        srv = _server(clients={"frame": client})
+        preset = _preset(interval=3600)
+        mgr = _manager(server=srv, presets=[preset], interval=0.1, default_id="ep1")
+        mgr.assign_preset_to_client("frame", preset.preset_id)
+
+        task = asyncio.create_task(mgr._feed_loop(endpoint))
+        try:
+            await asyncio.sleep(1.3)  # long enough for a second pass of the loop
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        assert pushes.get_nowait() is client
+        assert pushes.empty()
+
     async def test_connecting_client_is_served_without_waiting_for_the_next_pass(
         self, pushes, endpoint
     ):
