@@ -70,7 +70,7 @@ export type CommandItemProps = {
   onSelect?: ((value: string) => void) | undefined;
   className?: string | undefined;
   "aria-label"?: string | undefined;
-  /** For a row that toggles — a multi-select's ✓. cmdk leaves it alone; see `MultiSelect`. */
+  /** For a row that toggles — a combobox's ✓. cmdk leaves it alone; see `Combobox`. */
   "aria-checked"?: boolean | undefined;
   "aria-describedby"?: string | undefined;
   children?: ReactNode;
@@ -93,12 +93,13 @@ export type CommandShortcutProps = {
 };
 
 /** A `Command` in a `Dialog`: the palette. `title` and `description` name it and are not drawn. */
-export type CommandDialogProps = DialogProps & {
-  title?: string | undefined;
-  description?: string | undefined;
-  className?: string | undefined;
-  showCloseButton?: boolean | undefined;
-};
+export type CommandDialogProps = DialogProps &
+  Pick<CommandProps, "label" | "filter" | "shouldFilter"> & {
+    title?: string | undefined;
+    description?: string | undefined;
+    className?: string | undefined;
+    showCloseButton?: boolean | undefined;
+  };
 
 /** cmdk's own default name for its list. */
 export const COMMAND_LIST_LABEL = "Suggestions";
@@ -112,7 +113,7 @@ export const COMMAND_DIALOG_DESCRIPTION = "Search for a command to run...";
  * somewhere in the value or the keywords, ignoring case. `1` or `0`, because the native list is
  * not re-sorted — the order is the caller's.
  *
- * The same test `MultiSelect` hands cmdk, so a multi-select filters alike on both halves.
+ * The same test `Combobox` hands cmdk, so its search filters alike on both halves.
  */
 export function matchesEveryWord(value: string, search: string, keywords?: string[]): number {
   const words = search.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);

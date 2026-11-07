@@ -68,3 +68,36 @@ export type DialogSectionProps = {
   className?: string | undefined;
   children?: ReactNode;
 };
+
+/** The dialog's card, on both platforms. `bg-secondary`, as a `Card` is, so it stands off the page behind the overlay. */
+export const DIALOG_CONTENT_CLASS =
+  "w-full max-w-lg gap-4 rounded-lg border border-foreground/10 bg-secondary p-6 shadow-lg";
+
+/**
+ * The dialog's title, on both platforms and in `alert-dialog`. It names `text-foreground` itself:
+ * on the web the card is portalled out of the themed tree, and a title that inherited its colour
+ * there was the browser's black on a dark card. `leading-tight`, not `leading-none`: a title that
+ * wraps at phone width set its lines touching.
+ */
+export const DIALOG_TITLE_CLASS =
+  "text-lg font-semibold leading-tight tracking-tight text-foreground";
+
+/**
+ * The ✕ in the card's corner, on both platforms. `p-1` makes it a 24px target on the web rather
+ * than the bare 16px icon, and `right-3 top-3` with it keeps the icon where it was. Under the
+ * pointer, the keyboard and a finger it looks the same: hovered.
+ */
+export const DIALOG_DISMISS_CLASS =
+  "absolute right-3 top-3 rounded-sm p-1 text-foreground/60 hover:bg-hover hover:text-foreground focus-visible:bg-hover focus-visible:text-foreground active:bg-hover focus:outline-none";
+
+/** The title and description, left-aligned on both platforms (the web half adds `flex`). */
+export const DIALOG_HEADER_CLASS = "flex-col gap-1";
+
+/**
+ * The buttons: a right-aligned row, and below `sm` a stack of full-width buttons with the last
+ * (the main answer) on top — the same on both platforms (the web half adds `flex`).
+ */
+export const DIALOG_FOOTER_CLASS = "flex-col-reverse gap-2 sm:flex-row sm:justify-end";
+
+/** The sentence under the title, on both platforms and in `alert-dialog`. */
+export const DIALOG_DESCRIPTION_CLASS = "text-sm text-foreground/60";

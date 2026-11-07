@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { deletePreset } from '@/api';
-import { ActionButton } from '@/components/action-button';
 import { CardLayout } from '@/components/card-layout';
 import { ConfirmButton } from '@/components/confirm-button';
-import { DescriptionList, PropertyRow } from '@/components/description-list';
+import { PropertyList, PropertyRow } from '@/components/property-list';
 import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Pencil } from '@/components/ui/icons';
 import { formatCount } from '@/lib/format';
 import type { DevicePreset } from '@/types';
@@ -45,8 +45,8 @@ export function DevicePresetCard({ preset, onChanged, onEdit }: Props) {
           {preset.builtin && <Badge variant="secondary">built-in</Badge>}
           {preset.is_default && <Badge variant="info">default</Badge>}
           {onEdit && (
-            <ActionButton
-              label={`Edit ${preset.name}`}
+            <Button
+              aria-label={`Edit ${preset.name}`}
               variant="outline"
               size="icon-xs"
               iconSlot={<Pencil />}
@@ -55,7 +55,7 @@ export function DevicePresetCard({ preset, onChanged, onEdit }: Props) {
           )}
           {!preset.builtin && (
             <ConfirmButton
-              label={`Delete ${preset.name}`}
+              aria-label={`Delete ${preset.name}`}
               variant="destructive"
               size="xs"
               content="Delete"
@@ -73,7 +73,7 @@ export function DevicePresetCard({ preset, onChanged, onEdit }: Props) {
       }
       contentSlot={
         <>
-          <DescriptionList
+          <PropertyList
             contentSlot={
               <>
                 <PropertyRow label="Algo" value={preset.dither_algo} />

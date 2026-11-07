@@ -12,6 +12,24 @@ export type PasswordInputProps = Omit<InputProps, "type" | "trailingSlot"> & {
   revealable?: boolean | undefined;
 };
 
+/**
+ * The reveal button's two names for a field with this label: "Show API key", "Hide API key".
+ *
+ * @param label - The field's label. Only a string can be read into a name.
+ * @returns Both names, or neither for a label that is not a string.
+ *
+ * @remarks
+ * Most secrets in a form are not passwords, and a bound field knows what its own is called.
+ */
+export function revealLabelsFor(
+  label: unknown,
+): Pick<PasswordInputProps, "showLabel" | "hideLabel"> {
+  if (typeof label !== "string") {
+    return {};
+  }
+  return { showLabel: `Show ${label}`, hideLabel: `Hide ${label}` };
+}
+
 /** A password box with a button that shows and hides what was typed. */
 export function PasswordInput({
   showLabel = "Show password",

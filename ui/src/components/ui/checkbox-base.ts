@@ -25,4 +25,4 @@ export type CheckboxProps = {
  *
  * @border-colour each half adds it beside this, from the checked state.
  */
-export const CHECKBOX_CLASS = "h-4 w-4 shrink-0 items-center justify-center rounded border";
+export const CHECKBOX_CLASS = "h-4 w-4 shrink-0 items-center justify-center rounded-sm border";

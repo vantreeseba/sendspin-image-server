@@ -7,6 +7,7 @@ import {
   badgeHasLabel,
   badgeIconClass,
   badgeRemoveLabel,
+  badgeSoftDotClass,
   badgeTextFallback,
   badgeTextVariants,
   badgeVariants,
@@ -25,6 +26,8 @@ export function Badge({
   label,
   onRemove,
   removeLabel,
+  mono = false,
+  pulse = false,
   asChild = false,
   style,
   children,
@@ -40,15 +43,17 @@ export function Badge({
     ? ({ role: "img", "aria-label": label } as const)
     : ({ "aria-hidden": true } as const);
 
+  const softDot = shape === "pill" && !backgroundColor ? badgeSoftDotClass(variant) : null;
   const pill =
     shape === "pill" ? (
       <>
+        {softDot ? <span aria-hidden className={softDot} /> : null}
         {children}
         {onRemove ? (
           <button
             type="button"
             aria-label={removeLabel ?? badgeRemoveLabel(children, label)}
-            className="-my-1 -mr-1.5 -ml-1 inline-flex cursor-pointer items-center justify-center rounded-full p-1 text-inherit outline-none hover:opacity-75 focus-visible:opacity-75"
+            className="-my-1 -mr-1.5 -ml-1 inline-flex cursor-pointer items-center justify-center rounded-full p-1 text-inherit outline-none hover:bg-current/10 focus-visible:bg-current/10"
             onClick={(event) => {
               event.stopPropagation();
               onRemove();
@@ -73,8 +78,11 @@ export function Badge({
       className={cn(
         "inline-flex w-fit overflow-hidden whitespace-nowrap transition-colors focus-visible:outline-none [&>svg]:pointer-events-none [&>svg]:size-3",
         badgeContainerVariants({ variant, shape }),
-        shape === "pill" && (backgroundColor ? badgeTextFallback : badgeTextVariants({ variant })),
+        shape === "pill" &&
+          (backgroundColor ? badgeTextFallback(mono) : badgeTextVariants({ variant, mono })),
         variant === "link" && "[a&]:hover:underline [a&]:focus-visible:underline",
+        // Tailwind's pulse is `BADGE_PULSE_MS` long and `BADGE_PULSE_LOW` faint, as on device.
+        pulse && shape === "dot" && "motion-safe:animate-pulse",
         className,
       )}
       style={{

@@ -1,4 +1,4 @@
-import type { SelectOption } from '@/components/option-select';
+import type { SelectOption } from '@/lib/select-options';
 import { DITHERING_ALGOS, DITHERING_PALETTES, PALETTE_LABELS } from '@/types';
 
 export const ALGO_OPTIONS: SelectOption[] = DITHERING_ALGOS.map((algo) => ({

@@ -27,11 +27,16 @@ export type TooltipContentProps = {
   children: ReactNode;
 };
 
-/** The tooltip's bubble. */
+/**
+ * The tooltip's bubble: the page's colours swapped, so it stands apart from whatever it floats over.
+ * It was `bg-secondary`, a raised surface, which in light is all but the page's own white: with
+ * only a `/10` edge it melted into the row under it and read as see-through. `foreground` on
+ * `background` is the page's own text contrast, in every palette.
+ */
 export const TOOLTIP_CONTENT_CLASS =
-  "overflow-hidden rounded-md border border-foreground/10 bg-secondary px-3 py-1.5";
-/** The type of the tooltip's text. */
-export const TOOLTIP_TEXT_CLASS = "text-sm text-foreground";
+  "overflow-hidden rounded-md bg-foreground px-3 py-1.5 shadow-md";
+/** The type of the tooltip's text: the page's background colour, on the swapped bubble. */
+export const TOOLTIP_TEXT_CLASS = "text-sm text-background";
 
 /**
  * Where the bubble goes on native, per side. Radix measures and flips; there is no

@@ -3,17 +3,19 @@ import { Children, Fragment, isValidElement } from "react";
 import { cn, type SlotNode } from "@/lib/utils";
 
 /**
- * The floor a cell holds, which is the whole component: it is what decides when the row wraps
- * rather than squeezing. Two 45% cells fit and a third cannot, so it drops to the next line at
- * its full width instead of three fields sharing one line at a third each — which is where a
- * `<Select>`'s value and an `<Input>`'s placeholder start being clipped.
+ * A cell's size, which is the whole component: it is what decides when the row wraps rather than
+ * squeezing. Two things decide it. The percentage basis caps how many share a line — three 40%
+ * cells cannot fit, so a third drops to the next line at full width rather than three fields
+ * sharing one at a third each, which is where a `<Select>`'s value and an `<Input>`'s placeholder
+ * start being clipped. The fixed floor wraps the row by real width: below about 400px two fields
+ * stack, instead of the two 170px cells a percentage floor kept on a phone.
  *
- * Percentages rather than a `grid-cols-*`, because a grid keeps its columns at every width: the
- * same row that reads well on a settings page is two 140px fields inside a dialog.
+ * Not a `grid-cols-*`, because a grid keeps its columns at every width: the same row that reads
+ * well on a settings page is two 140px fields inside a dialog.
  */
-const CELL_FLOOR = {
-  2: "min-w-[45%]",
-  3: "min-w-[30%]",
+const CELL_SIZE = {
+  2: "grow basis-2/5 min-w-48",
+  3: "grow basis-1/4 min-w-40",
 } as const;
 
 type FieldRowProps = {
@@ -27,7 +29,7 @@ type FieldRowProps = {
    * form reaches for when two values belong together, a priority beside a duration, a start date
    * beside an end date.
    */
-  perRow?: keyof typeof CELL_FLOOR | undefined;
+  perRow?: keyof typeof CELL_SIZE | undefined;
   className?: string | undefined;
   cellClassName?: string | undefined;
 };
@@ -74,11 +76,7 @@ export function FieldRow({ contentSlot, perRow = 2, className, cellClassName }: 
   return (
     <div data-slot="field-row" className={cn("flex flex-wrap gap-4", className)}>
       {fieldsOf(contentSlot).map(({ key, node }) => (
-        <div
-          key={key}
-          data-slot="field-row-cell"
-          className={cn("flex-1", CELL_FLOOR[perRow], cellClassName)}
-        >
+        <div key={key} data-slot="field-row-cell" className={cn(CELL_SIZE[perRow], cellClassName)}>
           {node}
         </div>
       ))}

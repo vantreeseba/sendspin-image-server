@@ -13,13 +13,12 @@ import {
   setClientLocked,
   setClientPalette,
 } from '@/api';
-import { ActionButton } from '@/components/action-button';
 import { ClientDebugPreviewDialog } from '@/components/ClientDebugPreviewDialog';
 import { CardLayout } from '@/components/card-layout';
+import { Combobox } from '@/components/combobox';
 import { ConfirmButton } from '@/components/confirm-button';
-import { DescriptionList, PropertyRow } from '@/components/description-list';
 import { FormField } from '@/components/form-field';
-import { OptionSelect, type SelectOption } from '@/components/option-select';
+import { PropertyList, PropertyRow } from '@/components/property-list';
 import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -27,6 +26,7 @@ import { Eye, Lock } from '@/components/ui/icons';
 import { Input } from '@/components/ui/input';
 import { ALGO_OPTIONS, PALETTE_OPTIONS } from '@/lib/dither-options';
 import { formatAgo, formatDuration } from '@/lib/format';
+import type { SelectOption } from '@/lib/select-options';
 import type { Client, DevicePreset, DitheringAlgo, DitheringPalette, Endpoint } from '@/types';
 
 interface Props {
@@ -228,8 +228,8 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
         actionSlot={
           <>
             <StatusBadge client={client} />
-            <ActionButton
-              label={client.locked ? `Unlock ${displayName}` : `Lock ${displayName}`}
+            <Button
+              aria-label={client.locked ? `Unlock ${displayName}` : `Lock ${displayName}`}
               hint={client.locked ? 'Locked — click to unlock' : 'Unlocked — click to lock'}
               variant="ghost"
               size="icon-xs"
@@ -243,8 +243,8 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
               loading={locking}
               onClick={handleToggleLock}
             />
-            <ActionButton
-              label={`Debug preview for ${displayName}`}
+            <Button
+              aria-label={`Debug preview for ${displayName}`}
               hint="Debug preview"
               variant="ghost"
               size="icon-xs"
@@ -252,7 +252,7 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
               onClick={() => setDebugOpen(true)}
             />
             <ConfirmButton
-              label={`Forget ${displayName}`}
+              aria-label={`Forget ${displayName}`}
               variant="destructive-outline"
               size="xs"
               content="Forget"
@@ -267,7 +267,7 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
         }
         contentSlot={
           <>
-            <DescriptionList
+            <PropertyList
               contentSlot={
                 <>
                   <PropertyRow label="ID" value={client.id} valueClassName="font-mono" />
@@ -305,7 +305,7 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
               <FormField
                 label="Image provider"
                 controlSlot={(wired) => (
-                  <OptionSelect
+                  <Combobox
                     {...wired}
                     options={endpointOptions}
                     value={selectedEndpoint}
@@ -320,7 +320,7 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
               <FormField
                 label="Device preset"
                 controlSlot={(wired) => (
-                  <OptionSelect
+                  <Combobox
                     {...wired}
                     options={presetOptions}
                     value={selectedPreset ?? NO_PRESET}
@@ -336,7 +336,7 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
                 <FormField
                   label="Palette"
                   controlSlot={(wired) => (
-                    <OptionSelect
+                    <Combobox
                       {...wired}
                       options={PALETTE_OPTIONS}
                       value={selectedPalette}
@@ -347,7 +347,7 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
                 <FormField
                   label="Dithering"
                   controlSlot={(wired) => (
-                    <OptionSelect
+                    <Combobox
                       {...wired}
                       options={CLIENT_ALGO_OPTIONS}
                       value={selectedAlgo}

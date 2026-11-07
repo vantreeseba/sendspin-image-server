@@ -7,7 +7,8 @@ import { DevicePresetCard } from '@/components/DevicePresetCard';
 import { EditDevicePresetDialog } from '@/components/EditDevicePresetDialog';
 import { EditEndpointDialog } from '@/components/EditEndpointDialog';
 import { EndpointCard } from '@/components/EndpointCard';
-import { CardGrid, EmptyState } from '@/components/page';
+import { EmptyState } from '@/components/empty-state';
+import { GridLayout } from '@/components/grid-layout';
 import { PageLayout } from '@/components/page-layout';
 import { Section } from '@/components/section';
 import { Alert } from '@/components/ui/alert';
@@ -35,7 +36,7 @@ function ClientGroup({ title, clients, endpoints, onChanged }: ClientGroupProps)
     <Section
       title={`${title} (${clients.length})`}
       contentSlot={
-        <CardGrid
+        <GridLayout
           contentSlot={clients.map((c) => (
             <ClientCard key={c.id} client={c} endpoints={endpoints} onChanged={onChanged} />
           ))}
@@ -111,7 +112,7 @@ export default function App() {
               {!clients && !clientsError && <Spinner label="Loading clients" />}
               {clients?.length === 0 && (
                 <EmptyState
-                  icon={Plug}
+                  iconSlot={<Plug />}
                   title="No clients discovered"
                   description="Clients appear here once they connect or are found on the network."
                 />
@@ -153,7 +154,7 @@ export default function App() {
                   !endpoints || endpoints.length === 0 ? (
                     <EmptyState compact title="No image providers configured." />
                   ) : (
-                    <CardGrid
+                    <GridLayout
                       contentSlot={endpoints.map((ep) => (
                         <EndpointCard
                           key={ep.id}
@@ -183,7 +184,7 @@ export default function App() {
                   !presets || presets.length === 0 ? (
                     <EmptyState compact title="No device presets created." />
                   ) : (
-                    <CardGrid
+                    <GridLayout
                       contentSlot={presets.map((preset) => (
                         <DevicePresetCard
                           key={preset.id}

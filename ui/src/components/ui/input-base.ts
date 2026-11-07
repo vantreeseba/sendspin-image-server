@@ -155,6 +155,14 @@ export type InputProps = {
   /** Web only; the native keyboard has no equivalent constraint. */
   min?: number | undefined;
   max?: number | undefined;
+  /** Web only, as `min` and `max` are: what the spinners move by, and what the browser checks. */
+  step?: number | "any" | undefined;
+  /**
+   * A number keyboard with a minus key. Neither the `decimal` nor the `numeric` keypad on iOS has
+   * one, and no `inputMode` asks for it, so on iOS this raises the numbers-and-punctuation keyboard
+   * instead. Elsewhere it changes nothing: Android's number keyboards and the web's box take a minus.
+   */
+  signed?: boolean | undefined;
   disabled?: boolean | undefined;
   /**
    * Shown and focusable, but not editable: the value is on its way somewhere. Unlike `disabled` it
@@ -198,8 +206,17 @@ export type InputProps = {
    */
   trailingSlot?: SlotNode | undefined;
   /**
+   * A fixed part of the value, drawn before it inside the field's border and not editable: the
+   * `https://host/webhooks/` an id is appended to. Muted, in the flow, so a prefix of any width fits
+   * (a `leadingSlot` is an icon-wide cell). On a narrow screen it gives way from its start, so the
+   * part next to the value stays. The web reads it with the field, as part of its description.
+   */
+  prefixText?: string | undefined;
+  /** A fixed part after the value, as `prefixText` is before it: `.example.com`, `minutes`. */
+  suffixText?: string | undefined;
+  /**
    * The class of the box that holds the field and its `leadingSlot` / `trailingSlot`, which only
-   * exists when one of them is passed. `className` stays on the field itself, as it is on every
+   * exists when one of them (or `prefixText` / `suffixText`) is passed. `className` stays on the field itself, as it is on every
    * input, so size the pair here: `wrapperClassName="w-64"`.
    */
   wrapperClassName?: string | undefined;
@@ -230,6 +247,27 @@ export const INPUT_LEADING_PAD_CLASS = "pl-9";
 /** The text's padding before a trailing slot, so it never runs under the icon. */
 export const INPUT_TRAILING_PAD_CLASS = "pr-9";
 
+/**
+ * The box when there is a `prefixText` or `suffixText`: it takes the field's border, so the line,
+ * the focus colour and the invalid colour go round the text as well as the value.
+ */
+export const INPUT_ADDON_BOX_CLASS =
+  "border-foreground/50 bg-background flex h-10 w-full min-w-0 flex-row items-center overflow-hidden rounded-md border";
+
+/**
+ * The field inside that box: the box draws its border, so it draws none. It takes the room, and
+ * keeps a few characters of it however long the fixed text is: that text gives way first.
+ */
+export const INPUT_ADDON_FIELD_CLASS =
+  "h-full min-w-24 flex-1 rounded-none border-0 bg-transparent focus:border-0";
+
+/** A `prefixText` or `suffixText`: muted, one line, never pressed. */
+export const INPUT_ADDON_TEXT_CLASS = "text-foreground/60 min-w-0 shrink text-sm";
+
+/** In the box, a slot is a cell in the row rather than placed over the field. */
+export const INPUT_ADDON_SLOT_CLASS =
+  "flex h-full w-9 shrink-0 flex-row items-center justify-center";
+
 /** The input's box: border, background, height and type. */
 export const INPUT_CLASS =
-  "border-foreground/15 bg-background text-foreground placeholder:text-foreground/60 focus:border-active flex h-10 w-full rounded-md border px-3 py-2 text-sm focus:outline-none";
+  "border-foreground/50 bg-background text-foreground placeholder:text-foreground/60 focus:border-active flex h-10 w-full rounded-md border px-3 py-2 text-sm focus:outline-none";

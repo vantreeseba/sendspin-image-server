@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { deleteEndpoint } from '@/api';
-import { ActionButton } from '@/components/action-button';
 import { CardLayout } from '@/components/card-layout';
 import { ConfirmButton } from '@/components/confirm-button';
-import { DescriptionList, PropertyRow } from '@/components/description-list';
+import { PropertyList, PropertyRow } from '@/components/property-list';
 import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Pencil } from '@/components/ui/icons';
 import type { Endpoint } from '@/types';
 
@@ -50,8 +50,8 @@ export function EndpointCard({ endpoint, onChanged, onEdit }: Props) {
           {endpoint.builtin && <Badge variant="secondary">built-in</Badge>}
           {endpoint.is_default && <Badge variant="info">default</Badge>}
           {onEdit && !endpoint.builtin && (
-            <ActionButton
-              label={`Edit ${endpoint.name}`}
+            <Button
+              aria-label={`Edit ${endpoint.name}`}
               variant="outline"
               size="icon-xs"
               iconSlot={<Pencil />}
@@ -60,7 +60,7 @@ export function EndpointCard({ endpoint, onChanged, onEdit }: Props) {
           )}
           {!endpoint.builtin && (
             <ConfirmButton
-              label={`Delete ${endpoint.name}`}
+              aria-label={`Delete ${endpoint.name}`}
               variant="destructive"
               size="xs"
               content="Delete"
@@ -74,7 +74,7 @@ export function EndpointCard({ endpoint, onChanged, onEdit }: Props) {
       }
       contentSlot={
         <>
-          <DescriptionList
+          <PropertyList
             contentSlot={
               <>
                 <PropertyRow label="Type" value={KIND_LABELS[endpoint.kind] ?? endpoint.kind} />

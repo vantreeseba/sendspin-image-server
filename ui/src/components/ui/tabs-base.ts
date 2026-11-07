@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactElement, ReactNode } from "react";
 import type { SlotNode } from "@/lib/utils";
 
 export type TabsProps = {
@@ -45,6 +45,16 @@ export type TabsTriggerProps = {
    * coloured view, which is read as nothing.
    */
   trailingSlot?: SlotNode | undefined;
+  /**
+   * The route this tab is, as an element with no children: `<a href="/settings/agents" />`, a
+   * router's `<Link to="/settings/agents" />`. The tab is drawn *as* the link, keeping `role="tab"`
+   * and `aria-selected`, so it has an `href` to middle-click, open in a new tab or copy, and the
+   * label goes inside it. A press follows the link and selects the tab. As on `Button`, on device
+   * the link wraps the tab instead: expo-router's takes it with `asChild`.
+   *
+   * Pass the root `value` from the route, so the tab the page is on is the selected one.
+   */
+  linkSlot?: ReactElement | undefined;
 };
 
 export type TabsContentProps = {
@@ -58,11 +68,11 @@ export type TabsContentProps = {
  * scrolls sideways, and the two platforms centre a row that can overflow differently.
  */
 export const TABS_LIST_CLASS =
-  "h-10 items-center rounded-md border border-foreground/15 bg-background p-1";
+  "h-10 items-center rounded-md border border-foreground/50 bg-background p-1";
 /** The list's own `p-1`, kept clear of a tab brought into view so it does not sit on the border. */
 export const TABS_LIST_INSET = 4;
 /** A row, so an icon sits beside the label. `gap-1.5` is shadcn's own. */
 export const TABS_TRIGGER_CLASS =
   "flex-row items-center justify-center gap-1.5 rounded-sm px-3 py-1.5";
 /** The type of a tab's label. */
-export const TABS_TRIGGER_TEXT_CLASS = "text-sm font-medium";
+export const TABS_TRIGGER_TEXT_CLASS = "text-sm font-semibold";

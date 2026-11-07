@@ -1,4 +1,4 @@
-export const skeletonClass = "rounded-md bg-hover";
+export const skeletonClass = "rounded-md bg-foreground/10";
 
 /**
  * One pulse, down to half opacity and back: Tailwind's `animate-pulse`, which the web half

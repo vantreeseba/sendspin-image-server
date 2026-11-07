@@ -90,7 +90,7 @@ function ThemeOptions({
                 className={cn(
                   "h-4 w-4",
                   // Named, because a native icon has no `currentColor` to inherit from the segment.
-                  value === option ? "text-active-foreground" : "text-foreground/60",
+                  value === option ? "text-foreground" : "text-foreground/60",
                 )}
               />
             }

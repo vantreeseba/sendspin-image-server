@@ -1,6 +1,8 @@
 import { Select as SelectPrimitive } from "radix-ui";
 import type { ComponentPropsWithRef, ElementType } from "react";
 import {
+  SELECT_CONTENT_CLASS,
+  SELECT_ICON_CLASS,
   SELECT_ITEM_CLASS,
   SELECT_ITEM_TEXT_CLASS,
   SELECT_LABEL_CLASS,
@@ -8,6 +10,7 @@ import {
   SELECT_TRIGGER_CLASS,
   SELECT_TRIGGER_TEXT_CLASS,
 } from "@/components/ui/select-base";
+import { FrameFocusGuard } from "@/lib/frame-focus-guard";
 import { cn } from "@/lib/utils";
 import { Check, ChevronDown, ChevronUp } from "@/components/ui/icons";
 
@@ -77,13 +80,13 @@ function SelectTrigger({
       className={cn(
         SELECT_TRIGGER_CLASS,
         SELECT_TRIGGER_TEXT_CLASS,
-        "flex focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-negative aria-invalid:focus:border-active focus:border-active data-[placeholder]:text-foreground/60 data-[size=sm]:h-8 [&>span]:line-clamp-1",
+        "flex focus:outline-none disabled:cursor-not-allowed disabled:bg-foreground/10 disabled:opacity-50 aria-invalid:border-negative aria-invalid:focus:border-active focus:border-active data-[placeholder]:text-foreground/60 data-[size=sm]:h-8 [&>span]:line-clamp-1",
         className,
       )}
     >
       {children}
       <SelectPrimitive.Icon asChild>
-        <ChevronDown className="h-4 w-4 opacity-50" />
+        <ChevronDown className={SELECT_ICON_CLASS} />
       </SelectPrimitive.Icon>
     </SelectPrimitive.Trigger>
   );
@@ -105,7 +108,8 @@ function SelectContent({
         align={align}
         {...props}
         className={cn(
-          "bg-secondary text-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 relative z-50 max-h-(--radix-select-content-available-height) min-w-[8rem] origin-(--radix-select-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-md border shadow-md",
+          "text-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 relative z-50 max-h-(--radix-select-content-available-height) min-w-32 origin-(--radix-select-content-transform-origin) overflow-x-hidden overflow-y-auto",
+          SELECT_CONTENT_CLASS,
           position === "popper" &&
             "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
           className,
@@ -122,6 +126,8 @@ function SelectContent({
           {children}
         </SelectPrimitive.Viewport>
         <SelectScrollDownButton />
+        {/* A framed app focusing itself would blur the window, which closes the list at once. */}
+        <FrameFocusGuard />
       </SelectPrimitive.Content>
     </SelectPrimitive.Portal>
   );
@@ -136,7 +142,9 @@ function SelectItem({ className, children, ...props }: Props<typeof SelectPrimit
       className={cn(
         SELECT_ITEM_CLASS,
         SELECT_ITEM_TEXT_CLASS,
-        "focus:bg-hover focus:text-foreground relative flex cursor-default select-none outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+        // The chosen option is the chosen tint, a step further when highlighted: radix highlights
+        // the option under the pointer by focusing it.
+        "focus:bg-hover focus:text-foreground data-[state=checked]:bg-active/40 data-[state=checked]:focus:bg-active/60 relative flex cursor-default select-none outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
         className,
       )}
     >
