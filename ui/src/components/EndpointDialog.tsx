@@ -3,11 +3,11 @@ import { useState } from 'react';
 import { addEndpoint, type NewEndpoint, updateEndpoint } from '@/api';
 import { InputField, SelectField, useAppForm } from '@/components/app-form';
 import { DialogLayout } from '@/components/dialog-layout';
-import type { SelectOption } from '@/components/option-select';
 import { PasswordField } from '@/components/password-field';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { FormElement } from '@/components/ui/form-element';
+import type { SelectOption } from '@/lib/select-options';
 import type { Endpoint } from '@/types';
 
 interface Props {
