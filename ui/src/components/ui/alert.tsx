@@ -85,23 +85,44 @@ export function AlertTitle({ className, children }: AlertTitleProps) {
   return (
     <span
       data-slot="alert-title"
-      className={cn("cube-rn-text", "font-medium text-foreground text-sm", className)}
+      className={cn("cube-rn-text", "font-semibold text-foreground text-sm", className)}
     >
       {children}
     </span>
   );
 }
 
-/** shadcn's `AlertDescription`: the line under the title, in the variant's ink. */
+/**
+ * Whether a description is a run of text: a string, or text with a link or an emphasis inside it.
+ * Anything with no loose text is a block, such as a list or a paragraph or two, and is not one.
+ */
+function isInlineText(children: ReactNode): boolean {
+  return Children.toArray(children).some(
+    (child) => typeof child === "string" || typeof child === "number",
+  );
+}
+
+/**
+ * shadcn's `AlertDescription`: the line under the title, in the variant's ink.
+ *
+ * Text is a text element, as it was. Elements with no loose text around them (a `<ul>` of reasons,
+ * a couple of `<p>`s) go in a box instead, because a list inside a `<span>` is invalid HTML (#358).
+ * On the web the box hands the ink down; on device each `Text` inside takes its own.
+ */
 export function AlertDescription({ className, children }: AlertDescriptionProps) {
   const variant = useContext(AlertVariantContext);
+  const classes = cn("text-sm", ALERT_DESCRIPTION_INK[variant], className);
+  if (isInlineText(children)) {
+    return (
+      <span data-slot="alert-description" className={cn("cube-rn-text", classes)}>
+        {children}
+      </span>
+    );
+  }
   return (
-    <span
-      data-slot="alert-description"
-      className={cn("cube-rn-text", "text-sm", ALERT_DESCRIPTION_INK[variant], className)}
-    >
+    <div data-slot="alert-description" className={cn("cube-rn-view", "gap-1", classes)}>
       {children}
-    </span>
+    </div>
   );
 }
 

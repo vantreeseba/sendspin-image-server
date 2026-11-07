@@ -31,10 +31,17 @@ export type Validate<TValue> = (context: {
 
 /**
  * The validators a field call site writes, spelled out rather than imported: TanStack's own
- * `FieldValidators` takes twenty-three type parameters. Anything beyond these seven belongs on
+ * `FieldValidators` takes twenty-three type parameters. Anything beyond these belongs on
  * `form.AppField`, which has the real type in full.
  */
 export type Validators<TValues, TName extends DeepKeys<TValues>> = {
+  /**
+   * Other fields whose change runs this field's `onChange` validators again — a "Password, again"
+   * field listening to `password`, so changing the first marks a mismatch in the second.
+   */
+  onChangeListenTo?: DeepKeys<TValues>[] | undefined;
+  /** Other fields whose blur runs this field's `onBlur` validators again. */
+  onBlurListenTo?: DeepKeys<TValues>[] | undefined;
   onMount?: Validate<DeepValue<TValues, TName>> | undefined;
   onChange?: Validate<DeepValue<TValues, TName>> | undefined;
   onChangeAsync?: Validate<DeepValue<TValues, TName>> | undefined;

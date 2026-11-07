@@ -25,14 +25,16 @@ type CardProps = ViewProps & {
   onClick?: React.ComponentPropsWithoutRef<"button">["onClick"] | undefined;
 };
 
+/**
+ * The card's surface: its edge, fill and ink. Exported for a component that is a card but must
+ * render its own element, so it wears this rather than a copy of it that drifts.
+ */
+const CARD_SURFACE_CLASS = "rounded-lg border border-foreground/10 bg-secondary text-foreground";
+
 /** A bordered surface for one thing, pressable when given `onPress`. */
 const Card = React.forwardRef<HTMLDivElement, CardProps>(
   ({ className, accentColor, accentLabel, onClick: onPress, children, ...props }, ref) => {
-    const classes = cn(
-      "rounded-lg border border-foreground/10 bg-secondary text-foreground shadow-sm",
-      accentColor && "relative overflow-hidden",
-      className,
-    );
+    const classes = cn(CARD_SURFACE_CLASS, accentColor && "relative overflow-hidden", className);
     const inner = (
       <>
         <ColorBar color={accentColor} label={accentLabel} />
@@ -74,7 +76,7 @@ Card.displayName = "Card";
 const CardHeader = React.forwardRef<HTMLDivElement, ViewProps>(({ className, ...props }, ref) => (
   <div
     ref={ref as React.Ref<HTMLDivElement>}
-    className={cn("cube-rn-view", "flex flex-col gap-1.5 p-6", className)}
+    className={cn("cube-rn-view", "flex flex-col gap-1 p-4", className)}
     {...(props as React.ComponentPropsWithoutRef<"div">)}
   />
 ));
@@ -143,7 +145,7 @@ CardDescription.displayName = "CardDescription";
 const CardContent = React.forwardRef<HTMLDivElement, ViewProps>(({ className, ...props }, ref) => (
   <div
     ref={ref as React.Ref<HTMLDivElement>}
-    className={cn("cube-rn-view", "p-6 pt-0", className)}
+    className={cn("cube-rn-view", "p-4 pt-0", className)}
     {...(props as React.ComponentPropsWithoutRef<"div">)}
   />
 ));
@@ -153,7 +155,7 @@ CardContent.displayName = "CardContent";
 const CardFooter = React.forwardRef<HTMLDivElement, ViewProps>(({ className, ...props }, ref) => (
   <div
     ref={ref as React.Ref<HTMLDivElement>}
-    className={cn("cube-rn-view", "flex flex-row items-center p-6 pt-0", className)}
+    className={cn("cube-rn-view", "flex flex-row items-center p-4 pt-0", className)}
     {...(props as React.ComponentPropsWithoutRef<"div">)}
   />
 ));
@@ -170,10 +172,19 @@ CardFooter.displayName = "CardFooter";
 const CardAction = React.forwardRef<HTMLDivElement, ViewProps>(({ className, ...props }, ref) => (
   <div
     ref={ref as React.Ref<HTMLDivElement>}
-    className={cn("cube-rn-view", "absolute right-6 top-6 items-end", className)}
+    className={cn("cube-rn-view", "absolute right-4 top-4 items-end", className)}
     {...(props as React.ComponentPropsWithoutRef<"div">)}
   />
 ));
 CardAction.displayName = "CardAction";
 
-export { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle };
+export {
+  CARD_SURFACE_CLASS,
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+};

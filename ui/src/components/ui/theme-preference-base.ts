@@ -114,7 +114,7 @@ export type PalettePreferenceState = readonly [
 /**
  * The web's first paint, before React mounts: the rule `useThemePreference` applies, as a
  * self-contained script for an inline `<script>` in the page's `<head>`. A static `index.html`
- * pastes the copy in the skill's `controls.md`, which a unit test holds to this string.
+ * pastes the copy in the skill's `controls/theme.md`, which a unit test holds to this string.
  *
  * `dark` goes on `<html>` for Dark, for System on a dark device and for a dark-only palette,
  * because `tokens.web.css` has no media query and reads `.dark` alone. A palette other than the

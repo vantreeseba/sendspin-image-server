@@ -135,7 +135,7 @@ function Textarea({
         // `resize-y` is the browser's own affordance and has no native
         // counterpart; `disabled:` is the DOM attribute doing what the native
         // half spells out as `disabled && "opacity-50"`.
-        "resize-y disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-negative aria-invalid:focus:border-active",
+        "resize-y disabled:cursor-not-allowed disabled:bg-foreground/10 disabled:opacity-50 aria-invalid:border-negative aria-invalid:focus:border-active",
         // A box that sizes itself has no corner to drag, and lets go of the class's 80px floor.
         grows && "min-h-0 resize-none",
         className,

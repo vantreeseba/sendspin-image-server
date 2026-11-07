@@ -16,9 +16,11 @@ const Empty = React.forwardRef<HTMLDivElement, ViewProps>(({ className, ...props
   <div
     ref={ref as React.Ref<HTMLDivElement>}
     data-slot="empty"
+    // `border-dashed` with no width, as shadcn's Empty: no edge unless a caller adds one. The /10
+    // edge it had was 1.24:1, barely there in light and gone in dark.
     className={cn(
       "cube-rn-view",
-      "w-full min-w-0 items-center justify-center gap-3 rounded-lg border-dashed border-foreground/10 py-10",
+      "w-full min-w-0 items-center justify-center gap-3 rounded-lg border-dashed py-10",
       className,
     )}
     {...(props as React.ComponentPropsWithoutRef<"div">)}
@@ -92,7 +94,8 @@ const EmptyTitle = React.forwardRef<HTMLSpanElement, TextProps>(({ className, ..
   <span
     ref={ref as React.Ref<HTMLSpanElement>}
     data-slot="empty-title"
-    className={cn("cube-rn-text", "font-medium text-sm text-foreground", className)}
+    // A size over the description's, so the first thing a new user reads leads the block.
+    className={cn("cube-rn-text", "font-semibold text-base text-foreground", className)}
     {...(props as React.ComponentPropsWithoutRef<"span">)}
   />
 ));

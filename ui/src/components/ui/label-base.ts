@@ -19,7 +19,9 @@ export type LabelProps = {
 /**
  * Shared between both implementations so the two cannot drift on type size or
  * weight. `peer-disabled:` is a DOM-only variant and simply does not apply on
- * native, where a disabled control does not dim its label.
+ * native, where a disabled control does not dim its label. No `leading-none`:
+ * `text-sm`'s own line height, so a label that wraps does not set its lines
+ * touching.
  */
 export const LABEL_CLASS =
-  "text-foreground text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70";
+  "text-foreground text-sm font-semibold peer-disabled:cursor-not-allowed peer-disabled:opacity-50";

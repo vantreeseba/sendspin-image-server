@@ -1,6 +1,6 @@
-import type { ComponentProps, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { useState } from "react";
-import { ActionButton } from "@/components/action-button";
+import { Button, type ButtonPropsWithout } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 /*
@@ -8,7 +8,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
  * key written as a string: `"onPress"` alone would leave the compiled half's `onClick` in the type,
  * accepted and then dropped. The press is what opens the question, so neither half takes one.
  */
-type ConfirmButtonProps = Omit<ComponentProps<typeof ActionButton>, "onPress" | "onClick"> & {
+type ConfirmButtonProps = ButtonPropsWithout<"onPress" | "onClick"> & {
   /** The question, as a heading. "Delete this workspace?" */
   title: ReactNode;
   /**
@@ -31,13 +31,13 @@ type ConfirmButtonProps = Omit<ComponentProps<typeof ActionButton>, "onPress" | 
 };
 
 /**
- * A button that asks first: an {@link ActionButton} that opens `ConfirmDialog`, the same card
+ * A button that asks first: a {@link Button} that opens `ConfirmDialog`, the same card
  * `confirm()` raises. Destructive only; a confirm that is not destructive is a question, and a
  * question is `DialogLayout`.
  *
  * `description` is required because it says what is lost, which is the sentence that gets skipped
  * when it is optional. The open state is held here rather than through `DialogTrigger asChild`,
- * since the trigger is already a `TooltipTrigger asChild` and two `Slot`s over one button fight
+ * since a button with a `hint` is already a `TooltipTrigger asChild` and two `Slot`s over one button fight
  * over the ref. `requireText` is the type-the-name mode, and the box empties each time the dialog
  * opens.
  */
@@ -49,13 +49,16 @@ export function ConfirmButton({
   requireText,
   requireTextLabel,
   onConfirm,
+  // Quiet on the page and bold in the dialog: the trigger of a destructive question is
+  // `destructive-outline`, and the dialog's own confirm is the filled red step.
+  variant = "destructive-outline",
   ...props
 }: ConfirmButtonProps) {
   const [open, setOpen] = useState(false);
 
   return (
     <>
-      <ActionButton {...props} onClick={() => setOpen(true)} />
+      <Button variant={variant} {...props} onClick={() => setOpen(true)} />
       <ConfirmDialog
         open={open}
         onOpenChange={setOpen}

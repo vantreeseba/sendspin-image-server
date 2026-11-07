@@ -6,7 +6,9 @@ export function FormElement({ onSubmit, id, className, children }: FormElementPr
   return (
     <form
       id={id}
-      className={cn("flex flex-col", className)}
+      // A column of fields 16px apart, as the native half; a caller's gap wins, and a row needs
+      // `flex-row`.
+      className={cn("flex flex-col gap-4", className)}
       onSubmit={(e) => {
         e.preventDefault();
         e.stopPropagation();

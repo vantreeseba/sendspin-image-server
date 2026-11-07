@@ -40,13 +40,13 @@
   --hover: oklch(0.922 0.025 218);
   --active: oklch(0.5 0.07 218);
   --active-foreground: oklch(1 0 0);
-  --positive: oklch(0.5273 0.1371 150.069);
+  --positive: oklch(0.4479 0.1083 151.328);
   --positive-foreground: oklch(1 0 0);
-  --warning: oklch(0.5553 0.1455 48.998);
+  --warning: oklch(0.4732 0.1247 46.201);
   --warning-foreground: oklch(1 0 0);
   --info: oklch(0.5 0.1193 242.749);
   --info-foreground: oklch(1 0 0);
-  --negative: oklch(0.577 0.245 27.325);
+  --negative: oklch(0.505 0.213 27.518);
   --negative-foreground: oklch(1 0 0);
   --overlay: oklch(0 0 0);
   --card: oklch(0.985 0 0);
@@ -62,10 +62,10 @@
   --accent-foreground: oklch(0.145 0 0);
   --selection: oklch(0.5 0.07 218);
   --selection-foreground: oklch(1 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
+  --destructive: oklch(0.505 0.213 27.518);
   --destructive-foreground: oklch(1 0 0);
   --border: oklch(0.145 0 0 / 10%);
-  --input: oklch(0.145 0 0 / 15%);
+  --input: oklch(0.145 0 0 / 50%);
   --ring: oklch(0.5 0.07 218);
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
@@ -83,7 +83,7 @@
   --secondary: oklch(0.269 0 0);
   --neutral: oklch(0.922 0 0);
   --neutral-foreground: oklch(0.205 0 0);
-  --hover: oklch(0.371 0.035 218);
+  --hover: oklch(0.3 0.03 218);
   --active: oklch(0.68 0.065 218);
   --active-foreground: oklch(0.145 0 0);
   --positive: oklch(0.7227 0.192 149.579);
@@ -104,20 +104,20 @@
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.985 0 0 / 10%);
   --muted-foreground: oklch(0.985 0 0 / 60%);
-  --accent: oklch(0.371 0.035 218);
+  --accent: oklch(0.3 0.03 218);
   --accent-foreground: oklch(0.985 0 0);
   --selection: oklch(0.68 0.065 218);
   --selection-foreground: oklch(0.145 0 0);
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.145 0 0);
   --border: oklch(0.985 0 0 / 10%);
-  --input: oklch(0.985 0 0 / 15%);
+  --input: oklch(0.985 0 0 / 50%);
   --ring: oklch(0.68 0.065 218);
   --sidebar: oklch(0.269 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.68 0.065 218);
   --sidebar-primary-foreground: oklch(0.145 0 0);
-  --sidebar-accent: oklch(0.371 0.035 218);
+  --sidebar-accent: oklch(0.3 0.03 218);
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(0.985 0 0 / 10%);
   --sidebar-ring: oklch(0.68 0.065 218);
@@ -143,7 +143,7 @@ html[data-palette="monokai"] {
   --warning-foreground: oklch(0.2737 0.0109 114.803);
   --info: oklch(0.8269 0.108 211.963);
   --info-foreground: oklch(0.2737 0.0109 114.803);
-  --negative: oklch(0.7058 0.1936 8.454);
+  --negative: oklch(0.76 0.1936 8.454);
   --negative-foreground: oklch(0.2737 0.0109 114.803);
   --overlay: oklch(0 0 0);
   --card: oklch(0.2977 0.0124 113.753);
@@ -159,10 +159,10 @@ html[data-palette="monokai"] {
   --accent-foreground: oklch(0.9775 0.0079 106.545);
   --selection: oklch(0.7012 0.1812 298.062);
   --selection-foreground: oklch(0.2737 0.0109 114.803);
-  --destructive: oklch(0.7058 0.1936 8.454);
+  --destructive: oklch(0.76 0.1936 8.454);
   --destructive-foreground: oklch(0.2737 0.0109 114.803);
   --border: oklch(0.9775 0.0079 106.545 / 10%);
-  --input: oklch(0.9775 0.0079 106.545 / 15%);
+  --input: oklch(0.9775 0.0079 106.545 / 50%);
   --ring: oklch(0.7012 0.1812 298.062);
   --sidebar: oklch(0.2977 0.0124 113.753);
   --sidebar-foreground: oklch(0.9775 0.0079 106.545);
@@ -175,7 +175,7 @@ html[data-palette="monokai"] {
 }
 
 /*
- * Scrollbars in the palette: a thin thumb of the foreground at 30%, on no track. In
+ * Scrollbars in the palette: a thin thumb of the foreground at 40%, on no track. In
  * `@layer base` because an app's utilities are layered and an unlayered rule would beat every
  * one of them — `[scrollbar-width:none]` included, whatever its specificity. The colour is on
  * `*` too, though it inherits: read at each element, `--foreground` is the one in force there,
@@ -183,8 +183,21 @@ html[data-palette="monokai"] {
  */
 @layer base {
   * {
-    scrollbar-color: color-mix(in oklab, var(--foreground) 30%, transparent) transparent;
+    scrollbar-color: color-mix(in oklab, var(--foreground) 40%, transparent) transparent;
     scrollbar-width: thin;
+  }
+
+  /*
+   * What the browser draws itself — a time field's clock, a date field's calendar, a native
+   * select's list — is drawn for the mode in force, not left light on a dark page. A palette with
+   * only a dark mode is `.dark` as well, so it needs no rule of its own.
+   */
+  :root {
+    color-scheme: light;
+  }
+
+  .dark {
+    color-scheme: dark;
   }
 }
 

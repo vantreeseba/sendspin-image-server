@@ -1,10 +1,16 @@
-import type {
-  ComponentPropsWithoutRef,
-  HTMLInputTypeAttribute,
-  KeyboardEventHandler,
-  Ref,
+import {
+  type ComponentPropsWithoutRef,
+  type HTMLInputTypeAttribute,
+  type KeyboardEventHandler,
+  type MouseEvent,
+  type Ref,
+  useId,
 } from "react";
 import {
+  INPUT_ADDON_BOX_CLASS,
+  INPUT_ADDON_FIELD_CLASS,
+  INPUT_ADDON_SLOT_CLASS,
+  INPUT_ADDON_TEXT_CLASS,
   INPUT_CLASS,
   INPUT_LEADING_CLASS,
   INPUT_LEADING_PAD_CLASS,
@@ -42,6 +48,7 @@ export type InputProps = Omit<
     | "onBlur"
     | "min"
     | "max"
+    | "step"
     | "inputMode"
     | "value"
     | "defaultValue"
@@ -72,10 +79,26 @@ function Input({
   spellCheck,
   leadingSlot,
   trailingSlot,
+  prefixText,
+  suffixText,
   wrapperClassName,
   ref,
+  // A device keyboard's concern: a DOM number box already takes a minus.
+  signed: _signed,
   ...props
 }: InputProps) {
+  const addonId = useId();
+  const addons = prefixText !== undefined || suffixText !== undefined;
+  // The fixed text is read with the field, after whatever already describes it.
+  const describedBy = addons
+    ? [
+        props["aria-describedby"],
+        prefixText === undefined ? undefined : `${addonId}-prefix`,
+        suffixText === undefined ? undefined : `${addonId}-suffix`,
+      ]
+        .filter((id) => id !== undefined)
+        .join(" ")
+    : props["aria-describedby"];
   const corrects = typeof autoCorrect === "string" ? autoCorrect === "on" : autoCorrect;
   const autoCorrectWord = { true: "on", false: "off" } as const;
 
@@ -112,15 +135,95 @@ function Input({
         }
       }}
       {...props}
+      aria-describedby={describedBy}
       className={cn(
         INPUT_CLASS,
-        "file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-negative aria-invalid:focus:border-active",
-        leadingSlot != null && INPUT_LEADING_PAD_CLASS,
-        trailingSlot != null && INPUT_TRAILING_PAD_CLASS,
+        "file:border-0 file:bg-transparent file:text-sm file:font-semibold disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-negative aria-invalid:focus:border-active",
+        addons
+          ? [
+              INPUT_ADDON_FIELD_CLASS,
+              // The box fades instead, so the text fades with the value.
+              "disabled:opacity-100",
+              (prefixText !== undefined || leadingSlot != null) && "pl-0",
+              (suffixText !== undefined || trailingSlot != null) && "pr-0",
+            ]
+          : [
+              leadingSlot != null && INPUT_LEADING_PAD_CLASS,
+              trailingSlot != null && INPUT_TRAILING_PAD_CLASS,
+              // A quiet fill as well as the fade, or a disabled field with a value reads like an
+              // empty one with a placeholder. In the addon form the box carries it.
+              "disabled:bg-foreground/10",
+            ],
         className,
       )}
     />
   );
+
+  if (addons) {
+    return (
+      // biome-ignore lint/a11y/noStaticElementInteractions: a pointer convenience, as a label's is: the input inside is the control, and a keyboard reaches it directly.
+      <div
+        data-slot="input-wrapper"
+        className={cn(
+          INPUT_ADDON_BOX_CLASS,
+          "focus-within:border-active has-[:disabled]:cursor-not-allowed has-[:disabled]:bg-foreground/10 has-[:disabled]:opacity-50 has-[[aria-invalid=true]]:border-negative has-[[aria-invalid=true]]:focus-within:border-active",
+          wrapperClassName,
+        )}
+        // A press on the fixed text puts the caret in the value, as a press anywhere in a box does.
+        onMouseDown={(event: MouseEvent<HTMLDivElement>) => {
+          const input = event.currentTarget.querySelector("input");
+          if (input === null || event.target === input || input.disabled) {
+            return;
+          }
+          if ((event.target as Element).closest("button, a, [role=button]") === null) {
+            event.preventDefault();
+            input.focus();
+          }
+        }}
+      >
+        {leadingSlot != null ? (
+          <span data-slot="input-leading" className={cn(INPUT_ADDON_SLOT_CLASS, SLOT_ICON)}>
+            {leadingSlot}
+          </span>
+        ) : null}
+        {prefixText !== undefined ? (
+          <span
+            id={`${addonId}-prefix`}
+            data-slot="input-prefix"
+            // Right to left, so an overflow is cut from the start; `<bdi>` keeps the text in order.
+            className={cn(
+              INPUT_ADDON_TEXT_CLASS,
+              "cursor-text truncate whitespace-nowrap [direction:rtl]",
+              leadingSlot == null && "pl-3",
+            )}
+          >
+            <bdi>{prefixText}</bdi>
+          </span>
+        ) : null}
+        {field}
+        {suffixText !== undefined ? (
+          <span
+            id={`${addonId}-suffix`}
+            data-slot="input-suffix"
+            className={cn(
+              INPUT_ADDON_TEXT_CLASS,
+              "cursor-text truncate whitespace-nowrap",
+              // Short, and the half a reader needs whole: only the prefix gives way.
+              "shrink-0",
+              trailingSlot == null && "pr-3",
+            )}
+          >
+            {suffixText}
+          </span>
+        ) : null}
+        {trailingSlot != null ? (
+          <span data-slot="input-trailing" className={cn(INPUT_ADDON_SLOT_CLASS, SLOT_ICON)}>
+            {trailingSlot}
+          </span>
+        ) : null}
+      </div>
+    );
+  }
 
   if (leadingSlot == null && trailingSlot == null) {
     return field;

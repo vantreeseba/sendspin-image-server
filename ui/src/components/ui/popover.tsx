@@ -8,7 +8,14 @@ import type {
   PopoverSectionProps,
   PopoverTriggerProps,
 } from "@/components/ui/popover-base";
-import { cn } from "@/lib/utils";
+import {
+  POPOVER_CONTENT_CLASS,
+  POPOVER_DESCRIPTION_CLASS,
+  POPOVER_HEADER_CLASS,
+  POPOVER_TITLE_CLASS,
+} from "@/components/ui/popover-base";
+import { FrameFocusGuard } from "@/lib/frame-focus-guard";
+import { bridgePress, cn } from "@/lib/utils";
 
 /** The shared contract, widened to what the radix part (or element) underneath accepts. */
 type Wide<Base, Radix> = Base & Omit<Radix, keyof Base>;
@@ -37,10 +44,13 @@ function Popover({
 /** The element that opens the popover. */
 function PopoverTrigger({
   asChild,
+  children,
   ...props
 }: Wide<PopoverTriggerProps, React.ComponentProps<typeof PopoverPrimitive.Trigger>>) {
   return (
-    <PopoverPrimitive.Trigger data-slot="popover-trigger" asChild={asChild ?? false} {...props} />
+    <PopoverPrimitive.Trigger data-slot="popover-trigger" asChild={asChild ?? false} {...props}>
+      {asChild ? bridgePress(children) : children}
+    </PopoverPrimitive.Trigger>
   );
 }
 
@@ -49,6 +59,7 @@ function PopoverContent({
   className,
   align = "center",
   sideOffset = 4,
+  children,
   ...props
 }: Wide<PopoverContentProps, React.ComponentProps<typeof PopoverPrimitive.Content>>) {
   return (
@@ -58,11 +69,16 @@ function PopoverContent({
         align={align}
         sideOffset={sideOffset}
         className={cn(
-          "z-50 w-72 rounded-md border bg-secondary p-4 text-foreground shadow-md outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
+          POPOVER_CONTENT_CLASS,
+          "flex z-50 text-foreground outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
           className,
         )}
         {...props}
-      />
+      >
+        {children}
+        {/* A framed app focusing itself would take the focus out of the popover's search or field. */}
+        <FrameFocusGuard />
+      </PopoverPrimitive.Content>
     </PopoverPrimitive.Portal>
   );
 }
@@ -81,6 +97,7 @@ function PopoverAnchor({
 function PopoverClose({
   asChild,
   className,
+  children,
   ...props
 }: Wide<PopoverCloseProps, React.ComponentProps<typeof PopoverPrimitive.Close>>) {
   return (
@@ -89,7 +106,9 @@ function PopoverClose({
       asChild={asChild ?? false}
       {...(className === undefined ? {} : { className })}
       {...props}
-    />
+    >
+      {asChild ? bridgePress(children) : children}
+    </PopoverPrimitive.Close>
   );
 }
 
@@ -101,7 +120,7 @@ function PopoverHeader({
   return (
     <div
       data-slot="popover-header"
-      className={cn("flex flex-col gap-1 text-sm", className)}
+      className={cn(POPOVER_HEADER_CLASS, "flex flex-col", className)}
       {...props}
     />
   );
@@ -112,7 +131,9 @@ function PopoverTitle({
   className,
   ...props
 }: Wide<PopoverSectionProps, React.ComponentProps<"div">>) {
-  return <div data-slot="popover-title" className={cn("font-medium", className)} {...props} />;
+  return (
+    <div data-slot="popover-title" className={cn(POPOVER_TITLE_CLASS, className)} {...props} />
+  );
 }
 
 /** The muted line under the popover's title. */
@@ -121,7 +142,11 @@ function PopoverDescription({
   ...props
 }: Wide<PopoverSectionProps, React.ComponentProps<"p">>) {
   return (
-    <p data-slot="popover-description" className={cn("text-foreground/60", className)} {...props} />
+    <p
+      data-slot="popover-description"
+      className={cn(POPOVER_DESCRIPTION_CLASS, className)}
+      {...props}
+    />
   );
 }
 
