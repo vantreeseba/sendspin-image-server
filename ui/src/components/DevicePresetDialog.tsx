@@ -19,8 +19,7 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   title: string;
   submitLabel: string;
-  pendingLabel: string;
-  submitVariant: 'info' | 'positive';
+  loadingLabel: string;
   initial: NewDevicePreset;
   onSubmit: (preset: NewDevicePreset) => Promise<void>;
 }
@@ -42,8 +41,7 @@ export function DevicePresetDialog({
   onOpenChange,
   title,
   submitLabel,
-  pendingLabel,
-  submitVariant,
+  loadingLabel,
   initial,
   onSubmit,
 }: Props) {
@@ -111,11 +109,7 @@ export function DevicePresetDialog({
         <>
           <Button variant="outline" content="Cancel" onClick={close} />
           <form.AppForm>
-            <form.SubmitButton
-              variant={submitVariant}
-              content={submitLabel}
-              pendingLabel={pendingLabel}
-            />
+            <form.SubmitButton createLabel={submitLabel} loadingLabel={loadingLabel} />
           </form.AppForm>
         </>
       )}
