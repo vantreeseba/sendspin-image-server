@@ -91,7 +91,7 @@ export const SELECT_CONTENT_CLASS = "rounded-md border border-foreground/10 bg-s
 export const SELECT_ITEM_CLASS = "w-full flex-row items-center rounded-sm py-1.5 pl-8 pr-2";
 /** The type of an option's label. */
 export const SELECT_ITEM_TEXT_CLASS = "text-sm text-foreground";
-/** The heading over a group of options. */
-export const SELECT_LABEL_CLASS = "px-2 py-1.5 text-foreground/60 text-xs";
+/** The heading over a group of options, inset as far as their labels so it reads as theirs. */
+export const SELECT_LABEL_CLASS = "py-1.5 pl-8 pr-2 text-foreground/60 text-xs";
 /** The rule between groups of options. */
 export const SELECT_SEPARATOR_CLASS = "-mx-1 my-1 h-px bg-foreground/10";

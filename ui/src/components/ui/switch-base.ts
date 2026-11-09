@@ -27,6 +27,11 @@ export type SwitchProps = {
    */
   "aria-describedby"?: string | undefined;
   /**
+   * The value was refused: a validator's error. The track's edge turns `negative`, over the
+   * `active` edge of an on switch. A bound field sets it.
+   */
+  "aria-invalid"?: boolean | "true" | "false" | undefined;
+  /**
    * The switch's tooltip, as on `Button`: shown on hover and focus on the web and on a long press on
    * device, and the switch's description. With it, `disabled` keeps the switch focusable and
    * refuses the press (`aria-disabled`), so the reason it cannot be changed can still be read —
@@ -46,9 +51,17 @@ export const SWITCH_TRACK_CLASS =
   "h-5 w-9 shrink-0 flex-row items-center rounded-full border-2 border-transparent";
 /**
  * An on switch's track: the chosen tint, edged in `active` because the tint is not 3:1 from the
- * surface, and a step further under the pointer.
+ * surface, and a step further under the pointer and focused.
  */
-export const SWITCH_TRACK_ON_CLASS = "border-active bg-active/40 hover:bg-active/60";
+export const SWITCH_TRACK_ON_CLASS =
+  "border-active bg-active/40 hover:bg-active/60 focus-visible:bg-active/60";
+/**
+ * An off switch's track: the `/50` grey a control's edge is, 3:1 on every surface. Under the
+ * pointer and focused it keeps that fill and is edged in `active`: `bg-hover` in its place took
+ * the 3:1 away, and the track all but vanished when tabbed to.
+ */
+export const SWITCH_TRACK_OFF_CLASS =
+  "bg-foreground/50 hover:border-active focus-visible:border-active";
 /**
  * The switch's thumb: the circle that slides along the track. The one part laid over another, so
  * the smallest shadow — not a dialog's `shadow-lg`. Off, it is `background` on the `/50` track; on,

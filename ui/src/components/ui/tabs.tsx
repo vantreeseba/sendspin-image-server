@@ -11,7 +11,7 @@ import {
   type TabsProps,
   type TabsTriggerProps,
 } from "@/components/ui/tabs-base";
-import { cn } from "@/lib/utils";
+import { cn, FOCUS_EDGE } from "@/lib/utils";
 
 /** The shared contract, widened to what the radix part underneath accepts. */
 type Wide<Base, Radix> = Base & Omit<Radix, keyof Base>;
@@ -92,7 +92,7 @@ function TabsList({
       }}
       // `justify-center-safe`: plain centring puts the first tabs of a row that overflows past
       // the start, where no scrolling reaches them. The scrollbar is hidden because the row is
-      // 40px tall and the tabs themselves, by arrow key or by drag, are how it moves.
+      // one tab tall and the tabs themselves, by arrow key or by drag, are how it moves.
       className={cn(
         "inline-flex max-w-full justify-center-safe overflow-x-auto overflow-y-hidden text-foreground/60 [scrollbar-width:none]",
         TABS_LIST_CLASS,
@@ -150,7 +150,10 @@ function TabsContent({
   return (
     <TabsPrimitive.Content
       data-slot="tabs-content"
-      className={cn("mt-2 focus-visible:outline-none", className)}
+      // radix makes the pane a tab stop and nothing in it looks hovered, so it shows focus as a
+      // scroll box does: its edge turns `active`. A border, not the inset line, which a card
+      // filling the pane would cover.
+      className={cn("mt-2 rounded-md", FOCUS_EDGE, className)}
       {...props}
     />
   );

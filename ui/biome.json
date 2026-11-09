@@ -35,6 +35,7 @@
       "!src/lib/frame-focus-guard.ts",
       "!src/lib/number-draft.ts",
       "!src/lib/readable-text-color.ts",
+      "!src/lib/roving-focus.ts",
       "!src/lib/select-options.ts",
       "!src/lib/utils.ts",
       "!cubeui-reset.css",
@@ -53,7 +54,10 @@
       "react": "recommended"
     },
     "rules": {
-      "preset": "recommended"
+      "preset": "recommended",
+      "correctness": {
+        "noUnusedFunctionParameters": "error"
+      }
     }
   },
   "javascript": {

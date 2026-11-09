@@ -1,24 +1,34 @@
 import type { ReactNode } from "react";
 import * as React from "react";
-import { cn, type SlotNode } from "@/lib/utils";
+import { IconClassContext } from "@/components/ui/icons-base";
+import {
+  type RovingKeyEvent,
+  type RovingSet,
+  useRovingFocus,
+  useRovingItem,
+} from "@/lib/roving-focus";
+import { cn, hasSlot, type SlotNode, touchRowClass, touchTarget } from "@/lib/utils";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+
+/**
+ * What the bare circle is drawn at, grown to a finger's 44pt by a `hitSlop` on device (#470). A
+ * row is stacked against the next and a segment sits beside one, so each is made 44pt tall itself
+ * instead, and a card is bigger already.
+ */
+const DRAWN = { width: 16, height: 16 } as const;
 
 type Focusable = HTMLButtonElement;
 
-/** The web's key event, narrowed to the two members used — the same shape on both halves. */
-type KeyEvent = { key: string; preventDefault: () => void };
-
 type RadioGroupVariant = "row" | "card" | "segmented";
 
-type RadioGroupContextValue = {
+type RadioGroupContextValue = RovingSet & {
   value: string | undefined;
   tabStop: string | undefined;
   disabled: boolean;
   invalid: boolean;
   variant: RadioGroupVariant;
   select: (value: string) => void;
-  move: (from: string, event: KeyEvent) => void;
-  register: (value: string, ref: React.RefObject<Focusable | null>, disabled: boolean) => void;
-  unregister: (value: string) => void;
+  move: (from: string, event: RovingKeyEvent) => void;
 };
 
 const RadioGroupContext = React.createContext<RadioGroupContextValue | null>(null);
@@ -29,22 +39,6 @@ function useRadioGroup() {
     throw new Error("RadioGroupItem must be used within <RadioGroup>");
   }
   return context;
-}
-
-/** The one DOM method the ordering needs, which a device's node does not have. */
-type Positioned = { compareDocumentPosition: (other: unknown) => number };
-
-function isPositioned(node: unknown): node is Positioned {
-  return typeof node === "object" && node !== null && "compareDocumentPosition" in node;
-}
-
-/** DOM order, where there is a DOM. On device there is no keyboard to need it. */
-function byDocumentPosition(a: Focusable | null, b: Focusable | null) {
-  if (isPositioned(a) === false || !b) {
-    return 0;
-  }
-  // `Node.DOCUMENT_POSITION_FOLLOWING`, spelled out: `Node` is not a global on device.
-  return a.compareDocumentPosition(b) & 4 ? -1 : 1;
 }
 
 type RadioGroupProps = {
@@ -102,50 +96,6 @@ function RadioGroup({
   const [uncontrolled, setUncontrolled] = React.useState(defaultValue);
   const value = valueProp !== undefined ? valueProp : uncontrolled;
 
-  const refs = React.useRef(new Map<string, React.RefObject<Focusable | null>>());
-  // Which options exist and whether each is disabled — state rather than a ref, because the tab
-  // stop is derived from it and has to re-render when an option arrives.
-  const [options, setOptions] = React.useState<ReadonlyMap<string, boolean>>(new Map());
-
-  const register = React.useCallback(
-    (option: string, ref: React.RefObject<Focusable | null>, optionDisabled: boolean) => {
-      refs.current.set(option, ref);
-      setOptions((prev) => {
-        if (prev.get(option) === optionDisabled) {
-          return prev;
-        }
-        const next = new Map(prev);
-        next.set(option, optionDisabled);
-        return next;
-      });
-    },
-    [],
-  );
-  const unregister = React.useCallback((option: string) => {
-    refs.current.delete(option);
-    setOptions((prev) => {
-      if (prev.has(option) === false) {
-        return prev;
-      }
-      const next = new Map(prev);
-      next.delete(option);
-      return next;
-    });
-  }, []);
-
-  const enabled = () =>
-    disabled
-      ? []
-      : [...options]
-          .filter(([, optionDisabled]) => optionDisabled === false)
-          .map(([option]) => option)
-          .sort((a, b) =>
-            byDocumentPosition(
-              refs.current.get(a)?.current ?? null,
-              refs.current.get(b)?.current ?? null,
-            ),
-          );
-
   const select = (next: string) => {
     if (valueProp === undefined) {
       setUncontrolled(next);
@@ -154,39 +104,12 @@ function RadioGroup({
       onValueChange?.(next);
     }
   };
-
-  const move = (from: string, event: KeyEvent) => {
-    const order = enabled();
-    const at = order.indexOf(from);
-    const last = order.length - 1;
-    // Where a step past either end lands: round to the other end, or nowhere.
-    const pastLast = loop ? 0 : at;
-    const pastFirst = loop ? last : at;
-    let to: number;
-    if (event.key === "ArrowDown" || event.key === "ArrowRight") {
-      to = at < last ? at + 1 : pastLast;
-    } else if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
-      to = at > 0 ? at - 1 : pastFirst;
-    } else if (event.key === "Home") {
-      to = 0;
-    } else if (event.key === "End") {
-      to = last;
-    } else {
-      return;
-    }
-    // Always, even at an end with `loop={false}`: an arrow key the group owns must not also
-    // scroll the page.
-    event.preventDefault();
-    const target = order[to];
-    if (target === undefined || target === from) {
-      return;
-    }
-    refs.current.get(target)?.current?.focus();
-    select(target);
-  };
-
-  const order = enabled();
-  const tabStop = value !== undefined && order.includes(value) ? value : order[0];
+  const { tabStop, register, unregister, move } = useRovingFocus({
+    current: value,
+    onMove: select,
+    disabled,
+    loop,
+  });
   const horizontal =
     (orientation ?? (variant === "card" ? "horizontal" : "vertical")) === "horizontal";
   const stacked = horizontal ? "flex-row flex-wrap gap-3" : "gap-3";
@@ -196,7 +119,9 @@ function RadioGroup({
           // `self-stretch`, not `w-full`: in a row that is sized by its content, a browser
           // measures a percentage width as the content's and then resolves it against the total,
           // which pushed the group's neighbours out of the row by their own width.
-          "h-10 self-stretch flex-row gap-1 rounded-md border bg-background p-1",
+          // No height of its own: a frame round segments as tall as an input, as a `TabsList` is
+          // round its tabs, so the two are one height side by side (#537).
+          "self-stretch flex-row gap-1 rounded-md border bg-background p-1",
           ariaInvalid === true ? "border-negative" : "border-foreground/50",
         )
       : stacked;
@@ -242,17 +167,18 @@ type RadioGroupItemProps = {
   description?: ReactNode | undefined;
   /**
    * The picture over the label in a `card` tile, or the segment's face in `segmented`. Ignored by
-   * `row`. On device an icon has no `currentColor` to inherit, so in `segmented` give it the
-   * checked segment's `text-foreground` and the others' `text-foreground/60` yourself.
+   * `row`. In `segmented` a bare glyph is sized and inked by the segment, on both halves: the
+   * checked one's label colour, and the others' quieter one.
    */
   iconSlot?: SlotNode | undefined;
   /**
-   * A hover hint — the web's `title` — and the accessibility hint on device. For the one extra
-   * sentence a tile has no room for; say anything a user needs to choose in `description`.
+   * The one extra sentence a tile has no room for: the option's tooltip, on hover and focus on the
+   * web and on a long press on device, and read after its name whether or not the tooltip is open.
+   * Say anything a user needs to choose in `description`.
    *
-   * An icon-only `segmented` option with no `hint` uses its `aria-label` as the web tooltip, so the
-   * name a screen reader hears is also what a pointer sees on hover. Device has no hover, so there
-   * it is the name alone, with no hint repeating it.
+   * An icon-only `segmented` option with no `hint` shows its `aria-label` as the tooltip, so the
+   * name a screen reader hears is also what a pointer sees. It is not also the description, which
+   * would read the name twice.
    */
   hint?: string | undefined;
   /** The DOM's name for `hint`, accepted so a shadcn call site ports unchanged. `hint` wins. */
@@ -281,16 +207,11 @@ function RadioGroupItem({
 }: RadioGroupItemProps) {
   const hint = hintProp ?? title;
   const group = useRadioGroup();
-  const ref = React.useRef<Focusable>(null);
+  const ref = useRovingItem<Focusable>(group, value, itemDisabled);
   const uid = React.useId();
   const labelId = `${uid}-label`;
   const descriptionId = `${uid}-description`;
-
-  const { register, unregister } = group;
-  React.useEffect(() => {
-    register(value, ref, itemDisabled);
-  }, [register, value, itemDisabled]);
-  React.useEffect(() => () => unregister(value), [unregister, value]);
+  const hintId = `${uid}-hint`;
 
   const checked = group.value === value;
   const disabled = group.disabled || itemDisabled;
@@ -299,9 +220,14 @@ function RadioGroupItem({
   // The bare circle is for a caller's own `<Label>`; a segment is never one.
   const bare = label === undefined && segmented === false;
   const tooltip = hint ?? (segmented && label === undefined ? ariaLabel : undefined);
-  // A segment has no room for a description and draws none, so it points at none either.
+  // A segment has no room for a description and draws none, so it points at none either. The hint
+  // is read last, after what the option says about itself.
   const describedBy =
-    [description && segmented === false ? descriptionId : null, ariaDescribedByProp ?? null]
+    [
+      description && segmented === false ? descriptionId : null,
+      ariaDescribedByProp ?? null,
+      hint ? hintId : null,
+    ]
       .filter(Boolean)
       .join(" ") || undefined;
 
@@ -320,6 +246,8 @@ function RadioGroupItem({
     </div>
   );
 
+  const segmentInk = checked ? "text-foreground" : "text-foreground/60";
+
   // The item's box, one shape per variant.
   const look = () => {
     if (bare) {
@@ -327,7 +255,10 @@ function RadioGroupItem({
     }
     if (segmented) {
       return cn(
-        "min-w-0 flex-1 flex-row items-center justify-center gap-1.5 rounded-sm px-3",
+        // 40px, the height of an `Input` and of a tab, and 44pt on device, where it is that tall
+        // itself rather than by a `hitSlop`, as a tab is.
+        "h-10 min-w-0 flex-1 flex-row items-center justify-center gap-1.5 rounded-sm px-3",
+        touchRowClass(),
         // The checked segment is the chosen tint, a step further under the pointer and focused.
         checked
           ? "bg-active/40 text-foreground hover:bg-active/60 focus-visible:bg-active/60"
@@ -345,7 +276,14 @@ function RadioGroupItem({
         group.invalid && "border-negative",
       );
     }
-    return "flex-row items-start gap-3 rounded-sm focus-visible:bg-hover";
+    // The fill reaches past the circle and the words, by as much as it is drawn out from them
+    // (`-mx-2 -my-1.5`), so the row still lines up with what is above it. Hovered as focused. On
+    // device the row is 44pt tall, and a label alone sits in the middle of it.
+    return cn(
+      "-mx-2 -my-1.5 flex-row items-start gap-3 rounded-sm px-2 py-1.5 hover:bg-hover focus-visible:bg-hover",
+      touchRowClass(),
+      false,
+    );
   };
 
   // What the box holds, in the same order.
@@ -356,17 +294,17 @@ function RadioGroupItem({
     if (segmented) {
       return (
         <>
-          {iconSlot ? (
-            <div className="cube-rn-view items-center justify-center">{iconSlot}</div>
+          {hasSlot(iconSlot) ? (
+            // Colour does not inherit on device, so the glyph is handed the label's ink, as a
+            // `SegmentedButton`'s is; on the web it takes `currentColor` from the segment.
+            <IconClassContext.Provider value={cn("size-4 shrink-0", segmentInk)}>
+              <div className="cube-rn-view items-center justify-center">{iconSlot}</div>
+            </IconClassContext.Provider>
           ) : null}
           {label !== undefined ? (
             <span
               id={labelId}
-              className={cn(
-                "cube-rn-text",
-                "truncate text-sm font-semibold",
-                checked ? "text-foreground" : "text-foreground/60",
-              )}
+              className={cn("cube-rn-text", "truncate text-sm font-semibold", segmentInk)}
             >
               {label}
             </span>
@@ -377,7 +315,7 @@ function RadioGroupItem({
     if (card) {
       return (
         <>
-          {iconSlot ? (
+          {hasSlot(iconSlot) ? (
             <div className="cube-rn-view items-center justify-center">{iconSlot}</div>
           ) : null}
           {/* The radio's own dot beside the label: a 1px edge in another colour was the only
@@ -423,7 +361,7 @@ function RadioGroupItem({
     );
   };
 
-  return (
+  const option = (
     <button
       type="button"
       ref={ref as React.Ref<HTMLButtonElement>}
@@ -437,9 +375,8 @@ function RadioGroupItem({
       {...(ariaLabel ? { "aria-label": ariaLabel } : {})}
       aria-description={hint}
       tabIndex={group.tabStop === value ? (0 as const) : (-1 as const)}
-      onKeyDown={(event: KeyEvent) => group.move(value, event)}
+      onKeyDown={(event: RovingKeyEvent) => group.move(value, event)}
       aria-describedby={describedBy}
-      title={tooltip}
       className={cn(
         "cube-rn-view cube-rn-pressable",
         "focus-visible:outline-none",
@@ -447,9 +384,30 @@ function RadioGroupItem({
         disabled && "opacity-50",
         className,
       )}
+      {...(bare ? touchTarget(DRAWN) : {})}
     >
       {content()}
     </button>
+  );
+
+  if (!tooltip) {
+    return option;
+  }
+  // A `Tooltip`, not the web's `title` attribute, which a touch screen and a keyboard never show.
+  return (
+    <>
+      <Tooltip>
+        <TooltipTrigger asChild>{option}</TooltipTrigger>
+        <TooltipContent>{tooltip}</TooltipContent>
+      </Tooltip>
+      {/* What `aria-describedby` points at on the web; the tooltip is in the DOM only while it is
+          up. A device reads the hint as the accessibility hint instead. */}
+      {hint ? (
+        <span id={hintId} className="cube-rn-text sr-only text-foreground">
+          {hint}
+        </span>
+      ) : null}
+    </>
   );
 }
 

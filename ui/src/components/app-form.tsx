@@ -50,6 +50,8 @@ const FIELD_KEY_RECORD: Record<keyof FieldProps, true> = {
   descriptionPlacement: true,
   descriptionIconSlot: true,
   required: true,
+  // The field's, so the label fades with the control; `FormField` hands it on to the control.
+  disabled: true,
   actionSlot: true,
   loading: true,
   htmlFor: true,
@@ -538,8 +540,27 @@ function BoundPasswordField(props: PasswordFieldProps) {
   );
 }
 
-type SubmitButtonProps = ButtonPropsWithout<"type" | "loading" | "loadingLabel"> & {
-  /** What it says mid-flight. The label is replaced, not appended to. */
+type SubmitButtonProps = ButtonPropsWithout<"type" | "content" | "loading" | "loadingLabel"> & {
+  /**
+   * Whether the form edits something that exists (`editLabel`) or creates one (`createLabel`).
+   * Left out, the form has not said, and the button says "Save", which is true of both.
+   */
+  isEdit?: boolean | undefined;
+  /**
+   * The label on a form that creates: "Add task". Defaults to "Create" when `isEdit` is `false`,
+   * and to "Save" when `isEdit` is left out.
+   */
+  createLabel?: string | undefined;
+  /** The label when `isEdit` is set. */
+  editLabel?: string | undefined;
+  /** The label while the submit runs, in place of the other: "Adding…". "Saving…" if left out. */
+  loadingLabel?: string | undefined;
+  /**
+   * @deprecated Use `createLabel`, or `editLabel` with `isEdit`: the native `SubmitButton`'s
+   * names. Kept for one release, and it wins over both.
+   */
+  content?: ReactNode;
+  /** @deprecated Use `loadingLabel`, the name `Button` gives it. Kept for one release. */
   pendingLabel?: string | undefined;
   /**
    * Disabled while every value is still its default, for an edit form whose Save means nothing
@@ -569,12 +590,16 @@ type SubmitButtonProps = ButtonPropsWithout<"type" | "loading" | "loadingLabel">
  * a `type="submit"` button does nothing at all, so there it calls `form.handleSubmit()` itself,
  * as the native `SubmitButton` always does.
  *
- * `positive` by default, because its default is "Save": an action that keeps the work is
- * `positive`, one that adds something (Add, Create) is `info` — pass `variant="info"` there.
+ * `positive` whether it creates or edits: either way it keeps what was typed. The native
+ * `SubmitButton` is the same, with the same label props. A `variant` passed in still wins.
  */
 export function SubmitButton({
-  content = "Save",
-  pendingLabel = "Saving…",
+  isEdit,
+  createLabel,
+  editLabel = "Save changes",
+  loadingLabel,
+  content,
+  pendingLabel,
   variant = "positive",
   disabled,
   requireChanges = false,
@@ -585,6 +610,8 @@ export function SubmitButton({
   const canSubmit = useStore(form.store, (state) => state.canSubmit);
   const isSubmitting = useStore(form.store, (state) => state.isSubmitting);
   const untouched = useStore(form.store, (state) => state.isDefaultValue);
+  // "Create" only when the form says it creates: a bare submit is as often an edit form's.
+  const created = createLabel ?? (isEdit === false ? "Create" : "Save");
 
   // Ahead of the spread as well as OR-ed, so that neither a caller nor a future prop can put a
   // `disabled={false}` back over the store's answer.
@@ -602,8 +629,8 @@ export function SubmitButton({
       }}
       disabled={disabled || canSubmit === false || (requireChanges && untouched)}
       loading={isSubmitting}
-      loadingLabel={pendingLabel}
-      content={content}
+      loadingLabel={loadingLabel ?? pendingLabel ?? "Saving…"}
+      content={content ?? (isEdit === true ? editLabel : created)}
     />
   );
 }

@@ -34,44 +34,44 @@
   --radius: 0.625rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
-  --secondary: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
   --neutral: oklch(0.205 0 0);
   --neutral-foreground: oklch(0.985 0 0);
-  --hover: oklch(0.922 0.025 218);
+  --hover: oklch(0.91 0.025 218);
   --active: oklch(0.5 0.07 218);
   --active-foreground: oklch(1 0 0);
-  --positive: oklch(0.4479 0.1083 151.328);
+  --positive: oklch(0.453 0.108 151.3);
   --positive-foreground: oklch(1 0 0);
-  --warning: oklch(0.4732 0.1247 46.201);
+  --warning: oklch(0.393 0.112 44.2);
   --warning-foreground: oklch(1 0 0);
-  --info: oklch(0.5 0.1193 242.749);
+  --info: oklch(0.49 0.131 248.75);
   --info-foreground: oklch(1 0 0);
-  --negative: oklch(0.505 0.213 27.518);
+  --negative: oklch(0.5 0.17 27.5);
   --negative-foreground: oklch(1 0 0);
   --overlay: oklch(0 0 0);
-  --card: oklch(0.985 0 0);
+  --card: oklch(0.97 0 0);
   --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(0.985 0 0);
+  --popover: oklch(0.97 0 0);
   --popover-foreground: oklch(0.145 0 0);
   --primary: oklch(0.205 0 0);
   --primary-foreground: oklch(0.985 0 0);
   --secondary-foreground: oklch(0.145 0 0);
   --muted: oklch(0.145 0 0 / 10%);
   --muted-foreground: oklch(0.145 0 0 / 60%);
-  --accent: oklch(0.922 0.025 218);
+  --accent: oklch(0.91 0.025 218);
   --accent-foreground: oklch(0.145 0 0);
   --selection: oklch(0.5 0.07 218);
   --selection-foreground: oklch(1 0 0);
-  --destructive: oklch(0.505 0.213 27.518);
+  --destructive: oklch(0.5 0.17 27.5);
   --destructive-foreground: oklch(1 0 0);
   --border: oklch(0.145 0 0 / 10%);
   --input: oklch(0.145 0 0 / 50%);
   --ring: oklch(0.5 0.07 218);
-  --sidebar: oklch(0.985 0 0);
+  --sidebar: oklch(1 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.5 0.07 218);
   --sidebar-primary-foreground: oklch(1 0 0);
-  --sidebar-accent: oklch(0.922 0.025 218);
+  --sidebar-accent: oklch(0.91 0.025 218);
   --sidebar-accent-foreground: oklch(0.145 0 0);
   --sidebar-border: oklch(0.145 0 0 / 10%);
   --sidebar-ring: oklch(0.5 0.07 218);
@@ -80,13 +80,13 @@
 .dark {
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.269 0 0);
+  --secondary: oklch(0.205 0 0);
   --neutral: oklch(0.922 0 0);
   --neutral-foreground: oklch(0.205 0 0);
-  --hover: oklch(0.3 0.03 218);
+  --hover: oklch(0.27 0.03 218);
   --active: oklch(0.68 0.065 218);
   --active-foreground: oklch(0.145 0 0);
-  --positive: oklch(0.7227 0.192 149.579);
+  --positive: oklch(0.8003 0.1821 151.711);
   --positive-foreground: oklch(0.145 0 0);
   --warning: oklch(0.7686 0.1647 70.08);
   --warning-foreground: oklch(0.145 0 0);
@@ -95,16 +95,16 @@
   --negative: oklch(0.704 0.191 22.216);
   --negative-foreground: oklch(0.145 0 0);
   --overlay: oklch(0 0 0);
-  --card: oklch(0.269 0 0);
+  --card: oklch(0.205 0 0);
   --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.269 0 0);
+  --popover: oklch(0.205 0 0);
   --popover-foreground: oklch(0.985 0 0);
   --primary: oklch(0.922 0 0);
   --primary-foreground: oklch(0.205 0 0);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.985 0 0 / 10%);
   --muted-foreground: oklch(0.985 0 0 / 60%);
-  --accent: oklch(0.3 0.03 218);
+  --accent: oklch(0.27 0.03 218);
   --accent-foreground: oklch(0.985 0 0);
   --selection: oklch(0.68 0.065 218);
   --selection-foreground: oklch(0.145 0 0);
@@ -113,11 +113,11 @@
   --border: oklch(0.985 0 0 / 10%);
   --input: oklch(0.985 0 0 / 50%);
   --ring: oklch(0.68 0.065 218);
-  --sidebar: oklch(0.269 0 0);
+  --sidebar: oklch(0.145 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.68 0.065 218);
   --sidebar-primary-foreground: oklch(0.145 0 0);
-  --sidebar-accent: oklch(0.3 0.03 218);
+  --sidebar-accent: oklch(0.27 0.03 218);
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(0.985 0 0 / 10%);
   --sidebar-ring: oklch(0.68 0.065 218);
@@ -131,24 +131,24 @@
 html[data-palette="monokai"] {
   --background: oklch(0.2737 0.0109 114.803);
   --foreground: oklch(0.9775 0.0079 106.545);
-  --secondary: oklch(0.2977 0.0124 113.753);
+  --secondary: oklch(0.302 0.0124 113.753);
   --neutral: oklch(0.8414 0.2044 127.286);
   --neutral-foreground: oklch(0.2737 0.0109 114.803);
   --hover: oklch(0.3574 0.0184 103.002);
   --active: oklch(0.7012 0.1812 298.062);
   --active-foreground: oklch(0.2737 0.0109 114.803);
-  --positive: oklch(0.7227 0.192 149.579);
+  --positive: oklch(0.738 0.192 149.58);
   --positive-foreground: oklch(0.2737 0.0109 114.803);
-  --warning: oklch(0.7668 0.1683 62.374);
+  --warning: oklch(0.777 0.1683 66.37);
   --warning-foreground: oklch(0.2737 0.0109 114.803);
   --info: oklch(0.8269 0.108 211.963);
   --info-foreground: oklch(0.2737 0.0109 114.803);
-  --negative: oklch(0.76 0.1936 8.454);
+  --negative: oklch(0.735 0.1742 2.45);
   --negative-foreground: oklch(0.2737 0.0109 114.803);
   --overlay: oklch(0 0 0);
-  --card: oklch(0.2977 0.0124 113.753);
+  --card: oklch(0.302 0.0124 113.753);
   --card-foreground: oklch(0.9775 0.0079 106.545);
-  --popover: oklch(0.2977 0.0124 113.753);
+  --popover: oklch(0.302 0.0124 113.753);
   --popover-foreground: oklch(0.9775 0.0079 106.545);
   --primary: oklch(0.8414 0.2044 127.286);
   --primary-foreground: oklch(0.2737 0.0109 114.803);
@@ -159,12 +159,12 @@ html[data-palette="monokai"] {
   --accent-foreground: oklch(0.9775 0.0079 106.545);
   --selection: oklch(0.7012 0.1812 298.062);
   --selection-foreground: oklch(0.2737 0.0109 114.803);
-  --destructive: oklch(0.76 0.1936 8.454);
+  --destructive: oklch(0.735 0.1742 2.45);
   --destructive-foreground: oklch(0.2737 0.0109 114.803);
   --border: oklch(0.9775 0.0079 106.545 / 10%);
   --input: oklch(0.9775 0.0079 106.545 / 50%);
   --ring: oklch(0.7012 0.1812 298.062);
-  --sidebar: oklch(0.2977 0.0124 113.753);
+  --sidebar: oklch(0.2737 0.0109 114.803);
   --sidebar-foreground: oklch(0.9775 0.0079 106.545);
   --sidebar-primary: oklch(0.7012 0.1812 298.062);
   --sidebar-primary-foreground: oklch(0.2737 0.0109 114.803);
@@ -198,6 +198,37 @@ html[data-palette="monokai"] {
 
   .dark {
     color-scheme: dark;
+  }
+}
+
+/*
+ * Reduced motion (#441). When the reader's system asks for it, an `animate-in` or `animate-out`
+ * keeps its fade and loses its movement: a dialog no longer zooms, a tooltip no longer slides.
+ * tw-animate-css draws both from these variables, so one rule here reaches every element that
+ * wears one, an app's own included.
+ *
+ * The fade stays because it is how a thing says it arrived, and because radix waits for the
+ * exit animation's `animationend` before it unmounts a closed dialog, menu or popover:
+ * `animation: none` would leave it on the page.
+ *
+ * `!important` because `zoom-in-95` sets the same variable on the element itself, and where
+ * the utilities are unlayered a class outranks `*`. A movement an app wants kept anyway takes
+ * an `!important` of its own. Native never sees this: react-native-css drops a universal
+ * selector, and `motion-safe:` and `motion-reduce:` never match on device —
+ * `useReducedMotion()` from `@cubeui/reduced-motion` is the way to ask there.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    --tw-enter-translate-x: 0 !important;
+    --tw-enter-translate-y: 0 !important;
+    --tw-enter-scale: 1 !important;
+    --tw-enter-rotate: 0 !important;
+    --tw-exit-translate-x: 0 !important;
+    --tw-exit-translate-y: 0 !important;
+    --tw-exit-scale: 1 !important;
+    --tw-exit-rotate: 0 !important;
   }
 }
 

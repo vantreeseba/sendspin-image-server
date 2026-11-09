@@ -9,7 +9,7 @@ import {
   type TooltipProviderProps,
   type TooltipTriggerProps,
 } from "@/components/ui/tooltip-base";
-import { cn } from "@/lib/utils";
+import { CardBodyContext, cn } from "@/lib/utils";
 
 /** The shared contract, widened to what the radix part underneath accepts. */
 type Wide<Base, Radix> = Base & Omit<Radix, keyof Base>;
@@ -67,10 +67,14 @@ function TooltipTrigger({
   );
 }
 
+/** Kept clear of the window's edge, where radix would otherwise slide the bubble flush with it. */
+const COLLISION_PADDING = 8;
+
 /** The tooltip's bubble and its text. */
 function TooltipContent({
   side = "top",
   sideOffset = 4,
+  collisionPadding = COLLISION_PADDING,
   className,
   children,
   ...props
@@ -81,15 +85,17 @@ function TooltipContent({
         data-slot="tooltip-content"
         side={side}
         sideOffset={sideOffset}
+        collisionPadding={collisionPadding}
         className={cn(
-          "z-50 animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+          // `text-balance` evens the lines of a hint that wraps, so the last is not one word.
+          "z-50 text-balance animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
           TOOLTIP_CONTENT_CLASS,
           TOOLTIP_TEXT_CLASS,
           className,
         )}
         {...props}
       >
-        {children}
+        <CardBodyContext.Provider value={false}>{children}</CardBodyContext.Provider>
       </TooltipPrimitive.Content>
     </TooltipPrimitive.Portal>
   );

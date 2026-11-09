@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/badge-base";
 import { cn } from "@/lib/utils";
 import { X } from "@/components/ui/icons";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 export type { BadgeProps, BadgeVariant };
 
@@ -39,8 +40,10 @@ export function Badge({
   }) {
   const shape = asChild || badgeHasLabel(children) ? "pill" : "dot";
   const Comp = asChild ? Slot.Root : "span";
+  // `aria-describedby` is passed even when empty: radix points its trigger at the open bubble,
+  // `Slot` lets the child's value win, and describing the dot with its own name reads it twice.
   const dotName = label
-    ? ({ role: "img", "aria-label": label } as const)
+    ? ({ role: "img", "aria-label": label, "aria-describedby": undefined } as const)
     : ({ "aria-hidden": true } as const);
 
   const softDot = shape === "pill" && !backgroundColor ? badgeSoftDotClass(variant) : null;
@@ -71,7 +74,7 @@ export function Badge({
       </>
     ) : null;
 
-  return (
+  const badge = (
     <Comp
       data-slot="badge"
       data-variant={variant}
@@ -100,6 +103,16 @@ export function Badge({
           empty under `asChild` — made it throw "failed to slot onto its children" (#152). */}
       {asChild ? children : pill}
     </Comp>
+  );
+
+  if (shape === "pill" || Boolean(label) === false) {
+    return badge;
+  }
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{badge}</TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   );
 }
 

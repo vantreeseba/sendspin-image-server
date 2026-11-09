@@ -11,7 +11,7 @@ import {
   SELECT_TRIGGER_TEXT_CLASS,
 } from "@/components/ui/select-base";
 import { FrameFocusGuard } from "@/lib/frame-focus-guard";
-import { cn } from "@/lib/utils";
+import { CardBodyContext, cn } from "@/lib/utils";
 import { Check, ChevronDown, ChevronUp } from "@/components/ui/icons";
 
 // Each part's props are radix's, with `className` re-declared: radix types it `className?: string`,
@@ -123,7 +123,7 @@ function SelectContent({
               "h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)] scroll-my-1",
           )}
         >
-          {children}
+          <CardBodyContext.Provider value={false}>{children}</CardBodyContext.Provider>
         </SelectPrimitive.Viewport>
         <SelectScrollDownButton />
         {/* A framed app focusing itself would blur the window, which closes the list at once. */}

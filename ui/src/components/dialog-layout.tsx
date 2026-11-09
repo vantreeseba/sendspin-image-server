@@ -1,8 +1,15 @@
 import type { ReactNode } from "react";
 import { useState } from "react";
-import { cn, type SlotNode } from "@/lib/utils";
-import { CardLayout, type FloatingSurface, FloatingSurfaceContext } from "@/components/card-layout";
+import { holdOpen } from "@/components/ui/dialog-base";
+import { CardBodyContext, cn, HEADING_BODY_PAD, hasSlot, type SlotNode } from "@/lib/utils";
+import {
+  type ActionPlacement,
+  CardLayout,
+  type FloatingSurface,
+  FloatingSurfaceContext,
+} from "@/components/card-layout";
 import { ConfirmDialog, DISCARD_QUESTION } from "@/components/ui/confirm-dialog";
+import type { DescriptionPlacement } from "@/components/ui/description-hint";
 import {
   Dialog,
   DialogContent,
@@ -19,7 +26,8 @@ const SIZES = {
   md: "sm:max-w-lg",
   lg: "sm:max-w-2xl",
   xl: "sm:max-w-4xl",
-  full: "sm:max-w-[calc(100vw-4rem)]",
+  // 16px clear of each edge at every width, the gap every size has on a phone, and on device.
+  full: "sm:max-w-[calc(100%-2rem)]",
 } as const;
 
 /**
@@ -37,8 +45,14 @@ const SR_ONLY = "sr-only";
  * The chassis on the panel. `flex-1` on the web, where it sizes from content in a box of no set
  * height; Yoga's `flex: 1` starts from nothing, so on device it starts from its content and
  * shrinks under the panel's cap instead.
+ *
+ * No gap: the room above the body and the room under it differ. The header has the heading's 24px
+ * under it, as a card's has (`HEADING_BODY_PAD`, #512), and the footer keeps 16px over it.
  */
-const CHASSIS = "min-h-0 flex-1 gap-4";
+const CHASSIS = "min-h-0 flex-1";
+
+/** The room over the footer: the 16px the chassis's gap was. */
+const FOOTER_GAP = "pt-4";
 
 /**
  * What `wrapperSlot`'s element takes on the panel, so it stands where the chassis stood: the same
@@ -55,6 +69,12 @@ const WRAPPER = "flex min-h-0 flex-1 flex-col";
 const DIALOG_SURFACE: FloatingSurface = {
   drawTitle: (title, className) => <DialogTitle className={className}>{title}</DialogTitle>,
   drawDescription: (description) => <DialogDescription>{description}</DialogDescription>,
+  // Still the dialog's own description on the web, so radix points the dialog's
+  // `aria-describedby` at it. A device has no `aria-describedby`, and hidden text there is text
+  // VoiceOver stops on.
+  drawFoldedDescription: (description) => (
+    <DialogDescription className="sr-only">{description}</DialogDescription>
+  ),
   drawParts: ({
     headerSlot,
     contentSlot,
@@ -68,12 +88,23 @@ const DIALOG_SURFACE: FloatingSurface = {
         scroll
         className={CHASSIS}
         headerSlot={headerSlot}
-        // Four pixels of room either side, given back as padding: a focus ring is drawn outside
-        // the element that owns it, and a scroll container clips at its edge.
-        contentClassName={cn("-mx-1 min-w-0 px-1", contentClassName)}
-        contentSlot={contentSlot}
+        headerClassName={HEADING_BODY_PAD}
+        footerClassName={FOOTER_GAP}
+        // Room either side, given back as padding: a `List` or a `Table` reaches out by its rows'
+        // inset as it does in a card's body, and a scroll container clips at its edge. It is a
+        // `List` row's 12px, the wider of the two, so a list here does not scroll sideways.
+        // `gap-4` spaces what the body holds, as a card's body does: rows handed to a dialog
+        // otherwise touched (#537). `contentClassName` replaces it.
+        contentClassName={cn("-mx-3 min-w-0 gap-4 px-3", contentClassName)}
+        contentSlot={
+          // The dialog's content reset it, as every floating surface does; on this panel the
+          // card is the panel, so its body is a card's body again.
+          <CardBodyContext.Provider value={true}>{contentSlot}</CardBodyContext.Provider>
+        }
         footerSlot={
-          footerSlot ? <DialogFooter className={footerClassName}>{footerSlot}</DialogFooter> : null
+          hasSlot(footerSlot) ? (
+            <DialogFooter className={footerClassName}>{footerSlot}</DialogFooter>
+          ) : null
         }
       />
     );
@@ -91,6 +122,16 @@ export type DialogLayoutProps = {
   title: ReactNode;
   /** Read to the same people the title is. Absent, the dialog is described by its body. */
   description?: ReactNode | undefined;
+  /**
+   * Where the description is drawn. `inline` (the default) puts it under the title; `popover`
+   * puts it behind a small button after the title, named "About <title>", and on the web the
+   * dialog is still described by it. It stays inline on a dialog with no body and no footer,
+   * where the description is all the dialog says. `CardLayout`'s prop, passed to the card on the
+   * panel.
+   */
+  descriptionPlacement?: DescriptionPlacement | undefined;
+  /** The `popover` button's glyph. A question mark by default. */
+  descriptionIconSlot?: SlotNode | undefined;
   /** Keeps the title for assistive technology and takes it off the screen. */
   hideTitle?: boolean | undefined;
   /**
@@ -100,6 +141,12 @@ export type DialogLayoutProps = {
   iconSlot?: SlotNode | undefined;
   /** The header's far end, clear of the close button: a menu, a status badge, a switch. */
   actionSlot?: SlotNode | undefined;
+  /**
+   * Where the action goes when the title and the action do not both fit on one line. `wrap` (the
+   * default) moves the action under the title; `inline` keeps it beside the title and cuts the
+   * title short with an ellipsis instead. `CardLayout`'s prop, passed to the card on the panel.
+   */
+  actionPlacement?: ActionPlacement | undefined;
   /**
    * Shown instead of `contentSlot` when there is nothing in it: no element, or a `List` with no
    * rows — `CardLayout`'s rule.
@@ -117,7 +164,17 @@ export type DialogLayoutProps = {
   triggerSlot?: SlotNode | undefined;
   /** Controlled open state. Omit both this and `onOpenChange` to let the trigger drive it. */
   open?: boolean | undefined;
+  /**
+   * Called with `true` when the trigger opens it and `false` when it closes. A close that
+   * `hasUnsavedChanges` asks about is reported only once the answer is Discard. With `open`, this
+   * is where the caller sets it.
+   */
   onOpenChange?: ((open: boolean) => void) | undefined;
+  /**
+   * How wide the dialog is from the `sm` breakpoint up: `sm` 24rem, `md` 32rem, `lg` 42rem, `xl`
+   * 56rem, and `full` the window less 16px a side. Narrower than that, every size is as wide as the
+   * screen less the same 16px a side.
+   */
   size?: keyof typeof SIZES | undefined;
   /**
    * The footer's start. A destructive action, or a word on why the confirm is refusing. Several
@@ -125,7 +182,8 @@ export type DialogLayoutProps = {
    */
   footerSlot?: SlotNode | undefined;
   /**
-   * The footer's end. Cancel and confirm. Given alone, the footer is simply right-aligned.
+   * The footer's end. Cancel and confirm, as a fragment: below `sm` they stack full width, the
+   * last on top. Given alone, the footer is simply right-aligned.
    *
    * Pass a **function** to get the dialog's own close, guarded the same way Escape and the
    * overlay are. A Cancel wired to the caller's `setOpen(false)` goes around the shell entirely,
@@ -137,7 +195,7 @@ export type DialogLayoutProps = {
    * footerActionsSlot={(close) => (
    *   <>
    *     <Button variant="outline" onClick={close} content="Cancel" />
-   *     <Button onClick={save} content="Save" />
+   *     <Button variant="positive" onClick={save} content="Save" />
    *   </>
    * )}
    * ```
@@ -209,10 +267,22 @@ export type DialogLayoutProps = {
   discardLabel?: ReactNode | undefined;
   /** The verb that goes back to it: "Keep editing". Also what Escape answers. */
   keepLabel?: ReactNode | undefined;
+  /**
+   * Whether the ✕ is drawn in the corner. It closes the way Escape does, so `hasUnsavedChanges`
+   * still asks first. Turn it off only when the footer has a way out of its own, such as a Cancel.
+   */
   showCloseButton?: boolean | undefined;
+  /** On the dialog's panel. Its width comes from `size`, so reach for this for anything else. */
   className?: string | undefined;
+  /** On the header: the title, the description, and the room the ✕ takes. */
   headerClassName?: string | undefined;
+  /**
+   * On the body, the part that scrolls between the header and the footer. It is a column with
+   * `gap-4` between what it holds, as a card's body is; a gap here replaces it, and `gap-0` lets
+   * the children touch.
+   */
   contentClassName?: string | undefined;
+  /** On the footer, which holds `footerSlot` and the actions. */
   footerClassName?: string | undefined;
 };
 
@@ -229,9 +299,12 @@ export function DialogLayout({
   contentSlot,
   title,
   description,
+  descriptionPlacement = "inline",
+  descriptionIconSlot,
   hideTitle = false,
   iconSlot,
   actionSlot,
+  actionPlacement = "wrap",
   emptySlot,
   loading = false,
   triggerSlot,
@@ -253,7 +326,7 @@ export function DialogLayout({
   contentClassName,
   footerClassName,
 }: DialogLayoutProps) {
-  const stop = dismissible ? undefined : (event: Event) => event.preventDefault();
+  const stop = dismissible ? undefined : holdOpen;
 
   // Radix is handed an `open` either way, so one `requestClose` covers Escape, the overlay and
   // the close button alike. Uncontrolled, the state simply lives here instead of in the
@@ -290,6 +363,18 @@ export function DialogLayout({
     setOpenState(false);
   };
 
+  // After "Keep editing" the question fades out for a moment and is still the top layer, so an
+  // Escape pressed then reached it and not the dialog, and a person backing out had to press it
+  // again (#532). Answered already, the question hands that Escape to the dialog, which asks again
+  // while the work is unsaved and closes once it is not.
+  const escapeFromQuestion = (event: Event) => {
+    if (askingToDiscard) {
+      return;
+    }
+    event.preventDefault();
+    requestOpenChange(false);
+  };
+
   // The same close Escape, the overlay and the close button go through, handed to the footer so
   // a Cancel there is guarded by the thing that guards them.
   const actions =
@@ -304,8 +389,11 @@ export function DialogLayout({
       <CardLayout
         title={title}
         description={description}
+        descriptionPlacement={descriptionPlacement}
+        descriptionIconSlot={descriptionIconSlot}
         iconSlot={iconSlot}
         actionSlot={actionSlot}
+        actionPlacement={actionPlacement}
         contentSlot={contentSlot}
         emptySlot={emptySlot}
         loading={loading}
@@ -323,7 +411,7 @@ export function DialogLayout({
   );
 
   // ConfirmDialog holds the overlay click (it does not answer "discard?") and puts the safe
-  // answer first, where focus lands. The labels are passed: its own defaults are Confirm/Cancel.
+  // answer first, where focus lands. The labels are passed: its own defaults are Delete/Cancel.
   const discardQuestion = (
     <ConfirmDialog
       open={askingToDiscard}
@@ -333,6 +421,7 @@ export function DialogLayout({
       confirmLabel={discardLabel}
       cancelLabel={keepLabel}
       onConfirm={discard}
+      onEscapeKeyDown={escapeFromQuestion}
     />
   );
 

@@ -21,9 +21,9 @@ type SoftVariant = "destructive-soft" | "positive-soft" | "warning-soft" | "info
 
 /**
  * The dot drawn before a soft badge's words, in the hue. The words themselves are the foreground,
- * not the hue: `text-negative` on `bg-negative/10` is 3.99:1 in the default light palette, and
- * positive and warning are under 4.5:1 too — the reason `Alert` keeps its text the foreground. So
- * the hue is in the tint, the edge and this dot. A literal per hue, so Tailwind finds each class.
+ * not the hue, as on `Alert`: a soft badge is the quiet one beside a row's words, and words in
+ * the hue read as loud as the filled badge it stands in for. So the hue is in the tint, the edge
+ * and this dot. A literal per hue, so Tailwind finds each class.
  */
 const SOFT_DOT = {
   "destructive-soft": "bg-negative",
@@ -36,12 +36,21 @@ function isSoft(variant: BadgeVariant | null | undefined): variant is SoftVarian
   return variant !== null && variant !== undefined && variant in SOFT_DOT;
 }
 
-/** The soft variants' dot class, `null` for every other variant. */
+/**
+ * The soft variants' dot class, `null` for every other variant. 8px, the size of every dot drawn
+ * inside something, as the bare badge's is: `ColorDot`'s header has the registry's dot scale.
+ */
 export function badgeSoftDotClass(variant: BadgeVariant | null | undefined): string | null {
-  return isSoft(variant) ? `size-1.5 shrink-0 rounded-full ${SOFT_DOT[variant]}` : null;
+  return isSoft(variant) ? `size-2 shrink-0 rounded-full ${SOFT_DOT[variant]}` : null;
 }
 
 export type BadgeProps = {
+  /**
+   * What the badge says, which picks its colours: `default` for a label with nothing to say;
+   * `positive`, `warning`, `destructive` and `info` for a status, filled; each `-soft` for the same
+   * status as a tint, quieter beside text; `outline` and `secondary` for a quiet tag. `ghost` and
+   * `link` are kept for shadcn code.
+   */
   variant?: BadgeVariant | undefined;
   /**
    * Overrides the variant's background with a literal colour — for a badge
@@ -58,10 +67,11 @@ export type BadgeProps = {
    * is what computes the value to pass.
    */
   textColor?: string | undefined;
+  /** On the badge's box, the pill or the dot. */
   className?: string | undefined;
   /**
-   * What the dot stands for, exposed as its accessible name. In the pill form
-   * the text is already the name, so there it only feeds `removeLabel`'s default
+   * What the dot stands for: its accessible name, and on the web its tooltip under the pointer.
+   * In the pill form the text is already the name, so there it only feeds `removeLabel`'s default
    * when the children hold no text of their own.
    */
   label?: string | undefined;

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { useId, useState } from "react";
+import { holdOpen } from "@/components/ui/dialog-base";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -29,7 +30,10 @@ type ConfirmDialogProps = {
   onOpenChange: (open: boolean) => void;
   title: ReactNode;
   description: ReactNode;
-  /** The verb on the destructive button. A node, so it can carry an icon beside the word. */
+  /**
+   * The verb on the destructive button, naming the act: Delete, Discard, Revoke, Remove. A node,
+   * so it can carry an icon beside the word.
+   */
   confirmLabel?: ReactNode;
   cancelLabel?: ReactNode;
   /**
@@ -44,6 +48,12 @@ type ConfirmDialogProps = {
    */
   requireTextLabel?: ReactNode;
   onConfirm: () => void;
+  /**
+   * Told of an Escape (the back button on Android) before it answers Cancel; `preventDefault`
+   * keeps it from answering. For a caller with a dialog under the question: an Escape pressed while
+   * the question is still fading out reaches the question, and the caller can pass it on.
+   */
+  onEscapeKeyDown?: ((event: Event) => void) | undefined;
 };
 
 /**
@@ -69,11 +79,12 @@ export function ConfirmDialog({
   onOpenChange,
   title,
   description,
-  confirmLabel = "Confirm",
+  confirmLabel = "Delete",
   cancelLabel = "Cancel",
   requireText,
   requireTextLabel,
   onConfirm,
+  onEscapeKeyDown,
 }: ConfirmDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -81,6 +92,7 @@ export function ConfirmDialog({
         role="alertdialog"
         showCloseButton={false}
         onInteractOutside={holdOpen}
+        onEscapeKeyDown={onEscapeKeyDown}
         className="sm:max-w-sm"
       >
         {/* Keyed by the text, so a prompt raised over an open one for something else starts
@@ -101,9 +113,6 @@ export function ConfirmDialog({
     </Dialog>
   );
 }
-
-/** A press beside the card is not an answer; `preventDefault` is how both halves' `Dialog` hear it. */
-const holdOpen = (event: Event) => event.preventDefault();
 
 type ConfirmDialogBodyProps = {
   title: ReactNode;

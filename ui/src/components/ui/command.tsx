@@ -39,14 +39,17 @@ function CommandDialog({
   }) {
   return (
     <Dialog {...props}>
-      <DialogHeader className="sr-only">
-        <DialogTitle>{title}</DialogTitle>
-        <DialogDescription>{description}</DialogDescription>
-      </DialogHeader>
       <DialogContent
         className={cn("overflow-hidden p-0", className)}
         showCloseButton={showCloseButton}
       >
+        {/* Inside the card, as the native half has it, where shadcn puts them beside it: there
+            they were drawn in the page, under the trigger, whether the palette was open or not,
+            and read out of the page's text by a screen reader walking it. */}
+        <DialogHeader className="sr-only">
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
         {/* The list's own props reach it, so a palette over a list the server already matched
             can turn the filter off without giving up the dialog. */}
         <Command

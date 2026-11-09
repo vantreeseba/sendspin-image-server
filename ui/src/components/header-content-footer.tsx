@@ -1,5 +1,7 @@
 import { type Ref, useImperativeHandle, useRef } from "react";
-import { cn, type SlotNode } from "@/lib/utils";
+import { cn, hasSlot, INSET_FOCUS_EDGE, type SlotNode } from "@/lib/utils";
+import { useOverflows } from "@/components/ui/overflows";
+import { useReducedMotion } from "@/components/ui/reduced-motion";
 
 /**
  * The column a page's chrome and its content share.
@@ -55,9 +57,9 @@ export type ScrollPosition = {
  */
 export type ScrollHandle = {
   /**
-   * Scrolls to the last row. Animated unless told otherwise; a list following a row that is
-   * still streaming in passes `{ animated: false }`, or each new line starts a glide the next
-   * one interrupts.
+   * Scrolls to the last row. Animated unless told otherwise, or unless the reader's system asks
+   * for reduced motion; a list following a row that is still streaming in passes
+   * `{ animated: false }`, or each new line starts a glide the next one interrupts.
    */
   scrollToEnd: (options?: { animated?: boolean }) => void;
 };
@@ -104,6 +106,13 @@ export type HeaderContentFooterProps = {
    */
   headerWidth?: HeaderContentFooterWidth | undefined;
   /**
+   * The footer's own column, when it is not the body's: `full` lets the rule over the footer run
+   * the full width under a body held to `page` or `prose`, as `headerWidth` does for the header.
+   * What in the footer should still sit under the body's column holds itself to it, with
+   * `COLUMNS[width]` and the body's `px-4`. Absent, the footer shares `width`.
+   */
+  footerWidth?: HeaderContentFooterWidth | undefined;
+  /**
    * The scrolling body, for a caller that has to reach it — restoring a scroll position. A
    * `<div>` on the web and, while `scroll` is on, the `ScrollView` on device.
    */
@@ -119,20 +128,30 @@ export type HeaderContentFooterProps = {
    * end. Only a body that scrolls reports: with `scroll` off it is never called.
    */
   onScroll?: ((position: ScrollPosition) => void) | undefined;
+  /**
+   * On the root, the box the three parts divide. Give it a height (`h-full`, `flex-1`) for `scroll`
+   * to have one to divide.
+   */
   className?: string | undefined;
+  /** On the header, in its column: the one `headerWidth`, or else `width`, sets. */
   headerClassName?: string | undefined;
   /**
-   * On the body. On device, where the scroller and what it scrolls are two boxes, this goes on
-   * the scrolled content — padding on the scroller itself would scroll away with nothing.
+   * On the box that holds `contentSlot`. With `scroll` and a `page` or `prose` width, that is the
+   * column inside the scroller, which runs the full width so its scrollbar is at the edge. On
+   * device, while `scroll` is on, it is the `ScrollView`'s content. Otherwise the body is one box.
    */
   contentClassName?: string | undefined;
+  /**
+   * On the footer, in its column: the one `footerWidth`, or else `width`, sets. A bar's own rule
+   * and padding go here.
+   */
   footerClassName?: string | undefined;
 };
 
 type BodyProps = {
   contentSlot: SlotNode;
   scroll: boolean;
-  column: string | undefined;
+  width: HeaderContentFooterWidth;
   contentRef: HeaderContentFooterProps["contentRef"];
   scrollRef: HeaderContentFooterProps["scrollRef"];
   onScroll: HeaderContentFooterProps["onScroll"];
@@ -169,6 +188,33 @@ function assign<T>(ref: Ref<T> | undefined, node: T | null) {
 const BODY = cn("relative min-h-0 min-w-0", "flex-1");
 
 /**
+ * A column with the body's inset, matching a page header's `px-4`, for the body and the footer.
+ * Exported for a shell whose footer runs the full width while what is in it keeps the body's
+ * column, as `PageLayout`'s does.
+ */
+export function insetColumn(width: HeaderContentFooterWidth) {
+  return COLUMNS[width] && cn(COLUMNS[width], "px-4");
+}
+
+/**
+ * The column inside a scrolling body, on the web. The scroller runs the full width, so its
+ * scrollbar and its focus line are at the edge of the area rather than of the column.
+ *
+ * Not `mx-auto`. The scrollbar takes its width out of the box it scrolls, and a column centred in
+ * what is left sits half a scrollbar left of the header's, which is centred on the full width. So
+ * the start margin is the header's own: half of what the full width (`100%` plus the
+ * `--scrollbar-width` that `useOverflows` writes) leaves past the cap, and none once the area is
+ * narrower than the cap. The end takes what is left, so the column stops at the scrollbar. On device
+ * a scrollbar takes no room, and the content container takes `COLUMNS`' own classes.
+ */
+const SCROLLED_COLUMNS = {
+  full: undefined,
+  page: "max-w-(--breakpoint-2xl) ms-[max(0px,calc((100%+var(--scrollbar-width,0px)-var(--breakpoint-2xl))/2))] px-4",
+  prose:
+    "max-w-3xl ms-[max(0px,calc((100%+var(--scrollbar-width,0px)-var(--container-3xl))/2))] px-4",
+} as const;
+
+/**
  * The body, which is the one part that is a different element on each platform.
  *
  * Written as statements rather than a ternary because the two arms are different elements, and
@@ -178,7 +224,7 @@ const BODY = cn("relative min-h-0 min-w-0", "flex-1");
 function Body({
   contentSlot,
   scroll,
-  column,
+  width,
   contentRef,
   scrollRef,
   onScroll,
@@ -186,26 +232,32 @@ function Body({
 }: BodyProps) {
   // The scroller is kept here as well as handed to `contentRef`, for `scrollToEnd` to move.
   const scroller = useRef<unknown>(null);
+  const [measured, overflows] = useOverflows();
+  const reducedMotion = useReducedMotion();
+  const column = insetColumn(width);
   useImperativeHandle<ScrollHandle, ScrollHandle>(scrollRef, () => ({
     scrollToEnd: ({ animated = true } = {}) => {
       if (scroll && scroller.current) {
-        toEnd(scroller.current, animated);
+        // A glide is motion; under reduced motion the body jumps, whatever the caller asked.
+        toEnd(scroller.current, animated && reducedMotion === false);
       }
     },
   }));
+  const scrolledColumn = scroll ? SCROLLED_COLUMNS[width] : undefined;
   return (
     <div
       data-slot="header-content-footer-content"
       // The chassis's own ref type is the device's scroller; on the web both are a `<div>`.
       ref={(node) => {
         scroller.current = node;
+        measured.current = node;
         assign(contentRef as Ref<HTMLDivElement>, node);
       }}
       // A scrolling region a keyboard cannot reach is a region a keyboard user cannot read:
       // the mouse wheel moves it and nothing else does, which axe reports as
-      // `scrollable-region-focusable`. A tab stop is the fix the rule asks for, and it costs
-      // nothing when the body already holds focusable children — the caret goes to them next.
-      tabIndex={scroll ? 0 : undefined}
+      // `scrollable-region-focusable`. A tab stop is the fix the rule asks for, taken only
+      // while there is something to scroll, so a body that fits is not a stray stop.
+      tabIndex={scroll && overflows ? 0 : undefined}
       // A view's own props have no scroll event — on device a view does not scroll — so the
       // listener goes on as a spread, untyped. The element under it is a `<div>` either way.
       {...(scroll && onScroll
@@ -218,9 +270,28 @@ function Body({
               }),
           }
         : {})}
-      className={cn("cube-rn-view", BODY, scroll && "overflow-y-auto", column, className)}
+      className={cn(
+        "cube-rn-view",
+        BODY,
+        scroll && "overflow-y-auto",
+        // Inset, not `FOCUS_EDGE`'s border: a border would add a pixel to every gap measured
+        // from the body's edge, including a caller's `py-0`.
+        scroll && INSET_FOCUS_EDGE,
+        scrolledColumn ? undefined : cn(column, className),
+      )}
     >
-      {contentSlot}
+      {scrolledColumn ? (
+        <div
+          data-slot="header-content-footer-column"
+          // `grow` so it is at least as tall as the scroller, as the scroller was when it was the
+          // column itself: a child's `flex-1` still fills the body.
+          className={cn("cube-rn-view", "min-w-0 grow", scrolledColumn, className)}
+        >
+          {contentSlot}
+        </div>
+      ) : (
+        contentSlot
+      )}
     </div>
   );
 }
@@ -246,6 +317,7 @@ export function HeaderContentFooter({
   scroll = false,
   width = "full",
   headerWidth,
+  footerWidth,
   contentRef,
   scrollRef,
   onScroll,
@@ -254,10 +326,8 @@ export function HeaderContentFooter({
   contentClassName,
   footerClassName,
 }: HeaderContentFooterProps) {
-  // The header slot stays unpadded: a page header carries its own `px-4`, and the body matches
-  // it so the two edges line up.
-  const column = COLUMNS[width];
-  const bodyColumn = column && cn(column, "px-4");
+  // The header slot stays unpadded: a page header carries its own `px-4`, and the body and the
+  // footer match it so the edges line up.
 
   return (
     // `shrink` because a chassis is sized by its parent, and a view does not shrink by default.
@@ -265,7 +335,7 @@ export function HeaderContentFooter({
       data-slot="header-content-footer"
       className={cn("cube-rn-view", "min-h-0 min-w-0 shrink flex-col", className)}
     >
-      {headerSlot ? (
+      {hasSlot(headerSlot) ? (
         <div
           data-slot="header-content-footer-header"
           className={cn(
@@ -282,17 +352,22 @@ export function HeaderContentFooter({
       <Body
         contentSlot={contentSlot}
         scroll={scroll}
-        column={bodyColumn}
+        width={width}
         contentRef={contentRef}
         scrollRef={scrollRef}
         onScroll={onScroll}
         className={contentClassName}
       />
 
-      {footerSlot ? (
+      {hasSlot(footerSlot) ? (
         <div
           data-slot="header-content-footer-footer"
-          className={cn("cube-rn-view", "min-w-0 shrink-0", bodyColumn, footerClassName)}
+          className={cn(
+            "cube-rn-view",
+            "min-w-0 shrink-0",
+            insetColumn(footerWidth ?? width),
+            footerClassName,
+          )}
         >
           {footerSlot}
         </div>

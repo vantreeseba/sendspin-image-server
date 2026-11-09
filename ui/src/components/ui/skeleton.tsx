@@ -9,7 +9,7 @@ function Skeleton({ className, ...props }: SkeletonProps) {
   return (
     <div
       data-slot="skeleton"
-      className={cn("animate-pulse", skeletonClass, className)}
+      className={cn("motion-safe:animate-pulse", skeletonClass, className)}
       {...props}
     />
   );
