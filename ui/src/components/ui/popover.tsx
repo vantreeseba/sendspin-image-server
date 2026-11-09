@@ -15,7 +15,7 @@ import {
   POPOVER_TITLE_CLASS,
 } from "@/components/ui/popover-base";
 import { FrameFocusGuard } from "@/lib/frame-focus-guard";
-import { bridgePress, cn } from "@/lib/utils";
+import { bridgePress, CardBodyContext, cn } from "@/lib/utils";
 
 /** The shared contract, widened to what the radix part (or element) underneath accepts. */
 type Wide<Base, Radix> = Base & Omit<Radix, keyof Base>;
@@ -70,12 +70,12 @@ function PopoverContent({
         sideOffset={sideOffset}
         className={cn(
           POPOVER_CONTENT_CLASS,
-          "flex z-50 text-foreground outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
+          "flex z-50 origin-(--radix-popover-content-transform-origin) text-foreground outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
           className,
         )}
         {...props}
       >
-        {children}
+        <CardBodyContext.Provider value={false}>{children}</CardBodyContext.Provider>
         {/* A framed app focusing itself would take the focus out of the popover's search or field. */}
         <FrameFocusGuard />
       </PopoverPrimitive.Content>

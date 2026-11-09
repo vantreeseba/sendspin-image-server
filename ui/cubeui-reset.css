@@ -93,6 +93,17 @@
     font: inherit;
     text-align: inherit;
   }
+
+  /*
+   * A pressable that cannot be pressed does not offer the pointer, or every disabled button on the
+   * page looked pressable and did nothing (#523). `aria-disabled` as well as `:disabled`: a
+   * `Button` with a `hint` stays focusable so its reason can be read, and refuses the press
+   * instead of taking the attribute.
+   */
+  .cube-rn-pressable:disabled,
+  .cube-rn-pressable[aria-disabled="true"] {
+    cursor: not-allowed;
+  }
 }
 
 /*

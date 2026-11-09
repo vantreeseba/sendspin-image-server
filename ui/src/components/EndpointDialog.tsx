@@ -259,11 +259,12 @@ export function EndpointDialog({ open, onOpenChange, endpoint, onSaved }: Props)
         <>
           <Button variant="outline" content="Cancel" onClick={close} />
           <form.AppForm>
-            {editing ? (
-              <form.SubmitButton variant="positive" content="Save" pendingLabel="Saving…" />
-            ) : (
-              <form.SubmitButton variant="info" content="Add provider" pendingLabel="Adding…" />
-            )}
+            <form.SubmitButton
+              isEdit={editing}
+              editLabel="Save"
+              createLabel="Add provider"
+              loadingLabel={editing ? 'Saving…' : 'Adding…'}
+            />
           </form.AppForm>
         </>
       )}

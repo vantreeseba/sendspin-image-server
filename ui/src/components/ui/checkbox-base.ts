@@ -17,6 +17,12 @@ export type CheckboxProps = {
    * site shared across both halves is named on both.)
    */
   accessibilityLabel: string;
+  /**
+   * The value was refused: a validator's error. The edge turns `negative`, over the `active` edge
+   * of a checked one, so a required box that is wrong says so whichever state it is in. A bound
+   * field sets it; the web half takes it as radix's attribute.
+   */
+  "aria-invalid"?: boolean | "true" | "false" | undefined;
   className?: string | undefined;
 };
 

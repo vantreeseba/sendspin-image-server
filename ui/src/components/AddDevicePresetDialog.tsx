@@ -26,8 +26,7 @@ export function AddDevicePresetDialog({ open, onClose, onAdded }: Props) {
       }}
       title="Add device preset"
       submitLabel="Add preset"
-      pendingLabel="Adding…"
-      submitVariant="info"
+      loadingLabel="Adding…"
       initial={NEW_PRESET}
       onSubmit={async (preset) => {
         await addPreset(preset);

@@ -1,14 +1,24 @@
 import type { ReactNode } from "react";
 import * as React from "react";
-import { cn, type SlotNode } from "@/lib/utils";
-import { HeadingRow } from "@/components/card-layout";
+import {
+  cn,
+  HEADING_BODY_GAP,
+  HEADING_DESCRIPTION,
+  HEADING_TITLE,
+  hasSlot,
+  type SlotNode,
+} from "@/lib/utils";
+import { type ActionPlacement, HeadingRow } from "@/components/card-layout";
 import { DescribedTitle, type DescriptionPlacement, foldsDescription } from "@/components/ui/description-hint";
 import { SectionHeading } from "@/components/section-heading";
 
 type SectionProps = {
   /** The body: the fields, the rows, whatever the heading is over. */
   contentSlot?: SlotNode | undefined;
-  /** The overline. A short noun phrase — "Pomodoro", "Danger zone", "Notifications". */
+  /**
+   * What the group is called: a short noun phrase — "Pomodoro", "Danger zone", "Notifications".
+   * Drawn as a card's title is, 14px semibold in full ink.
+   */
   title?: ReactNode | undefined;
   /** One line under the title, in sentence case, on what the group is for. */
   description?: ReactNode | undefined;
@@ -23,6 +33,12 @@ type SectionProps = {
   descriptionIconSlot?: SlotNode | undefined;
   /** The heading row's far end: an add button, a count, a switch that disables the group. */
   actionSlot?: SlotNode | undefined;
+  /**
+   * Where the action goes when the title and the action do not both fit on one line. `wrap` (the
+   * default) moves the action under the title; `inline` keeps it beside the title and cuts the
+   * title short with an ellipsis instead. `CardLayout`'s, so a section and a card agree.
+   */
+  actionPlacement?: ActionPlacement | undefined;
   /** A hairline under the heading. Off by default; on, the group reads as one block. */
   divider?: boolean | undefined;
   /**
@@ -32,10 +48,19 @@ type SectionProps = {
    * the text should look — the text is the same size at every level.
    */
   level?: 1 | 2 | 3 | 4 | 5 | 6 | undefined;
+  /** On the whole section, the heading and its content together. */
   className?: string | undefined;
+  /** On the title's own `Text`: its size, its colour. */
   titleClassName?: string | undefined;
+  /** On the box that holds `contentSlot`, under the heading. */
   contentClassName?: string | undefined;
 };
+
+/**
+ * The title held to one line on device, for an `inline` action: `truncate` is the ellipsis on the
+ * web, and on device it is `numberOfLines`, which is what `line-clamp-1` becomes.
+ */
+const ONE_LINE_ON_DEVICE = undefined;
 
 /**
  * A heading over a group of fields or rows, with the body in `contentSlot`. It draws no surface: a
@@ -44,7 +69,7 @@ type SectionProps = {
  * The title is a heading of rank `level`, and on the web the root is a `<section>` named by it,
  * which makes it a `region` landmark. An untitled section has no name and is not a landmark. The
  * heading row is `CardLayout`'s and wraps: the action sits beside the text, level with the title's
- * top, while both fit, and drops under it when they do not.
+ * top, while both fit, and drops under it when they do not, unless `actionPlacement` is `inline`.
  */
 export function Section({
   contentSlot,
@@ -53,6 +78,7 @@ export function Section({
   descriptionPlacement = "inline",
   descriptionIconSlot,
   actionSlot,
+  actionPlacement = "wrap",
   divider = false,
   level = 2,
   className,
@@ -66,34 +92,37 @@ export function Section({
     <SectionHeading
       data-slot="section-title"
       id={titleId}
-      variant="overline"
       level={level}
+      title={title}
       className={cn(
-        // An overline in full ink: grey, it was outranked by the larger grey description under it.
-        // Weight, caps and ink lead; the size stays small.
-        "truncate text-foreground",
-        folded && "min-w-0 shrink",
+        // The heading rhythm's title, as a card's is (#473): it was a 12px caps overline, a third
+        // type scale beside the card's and the rows'. Weight and ink lead the description under
+        // it, which is the same size.
+        HEADING_TITLE,
+        "truncate",
+        (folded || actionPlacement === "inline") && "min-w-0 shrink",
+        actionPlacement === "inline" && ONE_LINE_ON_DEVICE,
         titleClassName,
       )}
-    >
-      {title}
-    </SectionHeading>
+    />
   ) : null;
-  const hasText = Boolean(title || description);
-  const hasHeading = Boolean(hasText || actionSlot);
+  const hasText = hasSlot(title) || hasSlot(description);
+  const hasHeading = hasText || hasSlot(actionSlot);
 
   return (
     <section
       data-slot="section"
       {...(title ? { "aria-labelledby": titleId } : {})}
       {...(folded ? { "aria-describedby": descriptionId } : {})}
-      className={cn("cube-rn-view", "min-w-0 gap-3", className)}
+      // The heading's 24px over the body, as a card's, past the 16px between the rows in it.
+      className={cn("cube-rn-view", "min-w-0", HEADING_BODY_GAP, className)}
     >
       {hasHeading ? (
         // `CardLayout`'s heading row, so a section's heading and a card's line up the same way.
         <HeadingRow
           data-slot="section-heading"
           actionTestID="section-action"
+          actionPlacement={actionPlacement}
           className={divider ? "border-b border-foreground/10 pb-1" : undefined}
           textSlot={
             hasText ? (
@@ -105,7 +134,7 @@ export function Section({
                   description ? (
                     <p
                       data-slot="section-description"
-                      className="cube-rn-text text-foreground/60 text-sm"
+                      className={cn("cube-rn-text", HEADING_DESCRIPTION)}
                     >
                       {description}
                     </p>
@@ -124,7 +153,7 @@ export function Section({
         />
       ) : null}
 
-      {contentSlot ? (
+      {hasSlot(contentSlot) ? (
         <div
           data-slot="section-content"
           className={cn("cube-rn-view", "min-w-0 gap-4", contentClassName)}

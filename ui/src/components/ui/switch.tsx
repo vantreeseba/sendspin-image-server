@@ -13,7 +13,7 @@ export type SwitchProps = Omit<ComponentPropsWithRef<typeof SwitchPrimitive.Root
    * The device half's name for the switch, taken so a call site shared across both halves still
    * names it — see `checkbox.web.tsx`. It becomes `aria-label`; an `aria-label` of its own wins.
    */
-  "aria-label"?: string | undefined;
+  accessibilityLabel?: string | undefined;
   /**
    * The switch's tooltip and description, as on `Button`. With it, `disabled` keeps the switch
    * focusable and refuses the press (`aria-disabled`), so the reason can still be read.
@@ -27,7 +27,7 @@ export type SwitchProps = Omit<ComponentPropsWithRef<typeof SwitchPrimitive.Root
 function Switch({
   className,
   size = "default",
-  "aria-label": accessibilityLabel,
+  accessibilityLabel,
   "aria-label": ariaLabel,
   hint,
   side = "top",
@@ -60,9 +60,12 @@ function Switch({
       aria-label={ariaLabel ?? accessibilityLabel}
       className={cn(
         SWITCH_TRACK_CLASS,
-        // On, `SWITCH_TRACK_ON_CLASS` under `data-[state=checked]:`, and focused the `/60` step it has
-        // under the pointer.
-        "peer group/switch inline-flex cursor-pointer transition-colors focus-visible:outline-none data-[state=unchecked]:focus-visible:bg-hover data-[state=checked]:border-active data-[state=checked]:bg-active/40 data-[state=checked]:hover:bg-active/60 data-[state=checked]:focus-visible:bg-active/60 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-negative data-[state=unchecked]:bg-foreground/50 data-[size=sm]:h-4 data-[size=sm]:w-7",
+        // On, `SWITCH_TRACK_ON_CLASS` under `data-[state=checked]:`, and off `SWITCH_TRACK_OFF_CLASS`
+        // under `data-[state=unchecked]:`. Invalid is stacked on the on state as well: a
+        // `data-[state]:` edge is emitted after an `aria-invalid:` one and would win, hiding a
+        // refused on switch. An off one's `active` edge under the pointer and focused does win, as a
+        // refused field's does, so it still shows where focus is.
+        "peer group/switch inline-flex cursor-pointer transition-colors focus-visible:outline-none data-[state=unchecked]:hover:border-active data-[state=unchecked]:focus-visible:border-active data-[state=checked]:border-active data-[state=checked]:bg-active/40 data-[state=checked]:hover:bg-active/60 data-[state=checked]:focus-visible:bg-active/60 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-negative aria-invalid:data-[state=checked]:border-negative data-[state=unchecked]:bg-foreground/50 data-[size=sm]:h-4 data-[size=sm]:w-7",
         refuses && "cursor-not-allowed opacity-50",
         className,
       )}
@@ -71,7 +74,7 @@ function Switch({
         data-slot="switch-thumb"
         className={cn(
           SWITCH_THUMB_CLASS,
-          "pointer-events-none block ring-0 transition-transform data-[state=checked]:bg-foreground data-[state=unchecked]:bg-background data-[state=checked]:translate-x-4 data-[state=unchecked]:translate-x-0 group-data-[size=sm]/switch:h-3 group-data-[size=sm]/switch:w-3 group-data-[size=sm]/switch:data-[state=checked]:translate-x-3",
+          "pointer-events-none block ring-0 transition-transform motion-reduce:transition-none data-[state=checked]:bg-foreground data-[state=unchecked]:bg-background data-[state=checked]:translate-x-4 data-[state=unchecked]:translate-x-0 group-data-[size=sm]/switch:h-3 group-data-[size=sm]/switch:w-3 group-data-[size=sm]/switch:data-[state=checked]:translate-x-3",
         )}
       />
     </SwitchPrimitive.Root>

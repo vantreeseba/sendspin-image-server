@@ -18,6 +18,7 @@ type ConfirmButtonProps = ButtonPropsWithout<"onPress" | "onClick"> & {
   description: ReactNode;
   /** The verb on the button that does it. */
   confirmLabel?: ReactNode | undefined;
+  /** The button that backs out, closing the question with nothing done. */
   cancelLabel?: ReactNode | undefined;
   /**
    * The text to type before the confirm button unlocks — the name of the folder, the
@@ -27,6 +28,7 @@ type ConfirmButtonProps = ButtonPropsWithout<"onPress" | "onClick"> & {
   requireText?: string | undefined;
   /** The input's label. Defaults to "Type **{requireText}** to confirm". */
   requireTextLabel?: ReactNode | undefined;
+  /** Runs once the reader says yes, after the dialog has closed. */
   onConfirm: () => void;
 };
 

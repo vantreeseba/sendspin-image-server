@@ -64,15 +64,23 @@ export type TabsContentProps = {
 };
 
 /**
- * The list's box. How its tabs are centred is each half's own: a list too narrow for its tabs
- * scrolls sideways, and the two platforms centre a row that can overflow differently.
+ * The list's box: a frame around its tabs, as tall as they are and its own padding. How its tabs
+ * are centred is each half's own: a list too narrow for its tabs scrolls sideways, and the two
+ * platforms centre a row that can overflow differently.
+ *
+ * No height of its own (#521). It was the 40px box an `Input` is, which left a tab 32px inside it,
+ * and on device a scroller clips a touch to its frame, so no `hitSlop` could grow a tab to 44pt.
  */
 export const TABS_LIST_CLASS =
-  "h-10 items-center rounded-md border border-foreground/50 bg-background p-1";
+  "items-center rounded-md border border-foreground/50 bg-background p-1";
 /** The list's own `p-1`, kept clear of a tab brought into view so it does not sit on the border. */
 export const TABS_LIST_INSET = 4;
-/** A row, so an icon sits beside the label. `gap-1.5` is shadcn's own. */
+/**
+ * A row, so an icon sits beside the label. `gap-1.5` is shadcn's own. 40px, the height of an
+ * `Input`, a `Select` and a default `Button`, so a tab is the same size as the controls beside it;
+ * the device half takes it to 44pt with `touchRowClass` (#521).
+ */
 export const TABS_TRIGGER_CLASS =
-  "flex-row items-center justify-center gap-1.5 rounded-sm px-3 py-1.5";
+  "h-10 flex-row items-center justify-center gap-1.5 rounded-sm px-3";
 /** The type of a tab's label. */
 export const TABS_TRIGGER_TEXT_CLASS = "text-sm font-semibold";

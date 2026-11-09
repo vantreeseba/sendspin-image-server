@@ -7,19 +7,27 @@ export type GridLayoutProps = {
    * a fragment of three cards is three cells and not one.
    */
   contentSlot: SlotNode;
+  /**
+   * On the grid, the row that wraps. The gap between the cells is here; each cell's width is not.
+   */
   className?: string | undefined;
 };
 
 /** Lays `contentSlot` out as equal cells, 1 to 4 to a row by the window's width. */
 export function GridLayout({ contentSlot, className }: GridLayoutProps) {
   return (
-    <div className={cn("cube-rn-view", "flex-row flex-wrap gap-4", className)}>
+    <div
+      data-slot="grid-layout"
+      className={cn("cube-rn-view", "flex-row flex-wrap gap-4", className)}
+    >
       {cells(contentSlot).map(({ key, cell }) => (
         // A fraction of the row minus its share of the `gap-4`, which a percentage width does not
-        // account for.
+        // account for. `min-w-0`, because a cell's floor is otherwise its content: one long
+        // unbroken string widened its cell past its share and pushed the row's last cell down.
         <div
           key={key}
-          className="cube-rn-view w-full sm:w-[calc(50%-0.5rem)] lg:w-[calc(33.333%-0.667rem)] xl:w-[calc(25%-0.75rem)]"
+          data-slot="grid-layout-cell"
+          className="cube-rn-view w-full min-w-0 sm:w-[calc(50%-0.5rem)] lg:w-[calc(33.333%-0.667rem)] xl:w-[calc(25%-0.75rem)]"
         >
           {cell}
         </div>

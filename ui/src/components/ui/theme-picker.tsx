@@ -20,12 +20,17 @@ type ThemePickerProps = {
   value?: ThemePreference | undefined;
   /** Told of every choice — the only way a controlled picker changes; a bound one also stores it. */
   onValueChange?: ((value: ThemePreference) => void) | undefined;
+  /** The choices cannot be changed, and are drawn faded. */
   disabled?: boolean | undefined;
+  /** The group's id, for a label or a description elsewhere to point at. */
   id?: string | undefined;
+  /** On the group the choices sit in. */
   className?: string | undefined;
   /** The group's name. Defaults to "Theme"; pass `aria-labelledby` instead when a heading names it. */
   "aria-label"?: string | undefined;
+  /** The id of a visible heading that names the group, in place of `aria-label`. */
   "aria-labelledby"?: string | undefined;
+  /** The ids of what describes the group, such as a bound field's hint. */
   "aria-describedby"?: string | undefined;
   /** Offer a palette as well, under the theme: these, in this order. Left out, no palette choice. */
   palettes?: readonly PalettePreference[] | undefined;
@@ -84,16 +89,8 @@ function ThemeOptions({
             key={option}
             value={option}
             aria-label={label}
-            iconSlot={
-              <Icon
-                aria-hidden
-                className={cn(
-                  "h-4 w-4",
-                  // Named, because a native icon has no `currentColor` to inherit from the segment.
-                  value === option ? "text-foreground" : "text-foreground/60",
-                )}
-              />
-            }
+            // Bare: the segment sizes the glyph and hands it its ink on device.
+            iconSlot={<Icon aria-hidden />}
           />
         ) : (
           <RadioGroupItem

@@ -1,20 +1,20 @@
 import type { ReactNode } from "react";
 import { cloneElement, isValidElement, useId } from "react";
-import { cn, type SlotNode } from "@/lib/utils";
+import { cn, HEADING_GAP, hasSlot, type SlotNode } from "@/lib/utils";
 import { DescriptionHint, DescriptionHintText } from "@/components/ui/description-hint";
 import { Field, FieldContent, FieldDescription, FieldError, FieldLabel, FieldTitle } from "@/components/ui/field";
 import { Skeleton } from "@/components/ui/skeleton";
 
 /**
  * The box the absent control leaves behind while it is loading, per orientation: a `vertical`
- * field holds an `Input`, a `Select` trigger or a `DatePicker`, all of which rest at `h-9`; a
+ * field holds an `Input`, a `Select` trigger or a `DatePicker`, all of which rest at `h-10`; a
  * `horizontal` one holds the 16px box of a checkbox or the 18px pill of a switch.
  *
  * A skeleton that is not the height of what replaces it is a page that jumps when the data lands,
  * which is the whole reason to draw one.
  */
 const LOADING_BOX = {
-  vertical: "h-9 w-full rounded-md",
+  vertical: "h-10 w-full rounded-md",
   horizontal: "size-4 rounded-sm",
 } as const;
 
@@ -29,6 +29,8 @@ export type ControlProps = {
   "aria-describedby": string | undefined;
   "aria-invalid": true | undefined;
   "aria-required": true | undefined;
+  /** {@link FormFieldProps.disabled}, for the control to take as its own. */
+  disabled: true | undefined;
 };
 
 /**
@@ -121,6 +123,12 @@ type FormFieldProps = {
    * which blocks a submit the caller may have wanted to make.
    */
   required?: boolean | undefined;
+  /**
+   * The control cannot be changed. The field fades as one: the label and the description with the
+   * control, which is handed `disabled` too. A control given `disabled` of its own fades the field
+   * just the same, so `controlSlot={<Input disabled />}` needs nothing here.
+   */
+  disabled?: boolean | undefined;
   /** The label row's far end. "Forgot password?", a character count, a reveal toggle. */
   actionSlot?: SlotNode | undefined;
   /**
@@ -186,10 +194,14 @@ type FormFieldProps = {
    * the caller also wrapped the form in a `FieldGroup` — a prop that depends on an ancestor the
    * shell cannot see is a prop that does nothing most of the time it is passed.
    */
-  orientation?: keyof typeof LOADING_BOX | undefined;
+  orientation?: "vertical" | "horizontal" | undefined;
+  /** On the field, the box around the label, the control, the description and the error. */
   className?: string | undefined;
+  /** On the label, the `FieldLabel` (or with `asGroup`, the `FieldTitle`). */
   labelClassName?: string | undefined;
+  /** On the description, the `FieldDescription` under the control. */
   descriptionClassName?: string | undefined;
+  /** On the error, the `FieldError` under the control, drawn while there is one. */
   errorClassName?: string | undefined;
   /** Sizes the loading box for a control that is not input-height — a `<Textarea rows={6}>`. */
   loadingClassName?: string | undefined;
@@ -214,6 +226,7 @@ export function FormField({
   descriptionIconSlot,
   error,
   required = false,
+  disabled = false,
   actionSlot,
   loading = false,
   htmlFor,
@@ -234,6 +247,7 @@ export function FormField({
     !renderControl && isValidElement<Record<string, unknown>>(controlSlot) ? controlSlot : null;
   const givenId = typeof element?.props.id === "string" ? element.props.id : undefined;
   const controlId = htmlFor ?? givenId ?? reactId;
+  const shownDisabled = disabled || element?.props.disabled === true;
 
   // Suppressed while loading, so the field does not report a stale rejection of a value that is
   // on its way. It is also what keeps the message rail honest: `error` is the only part of the
@@ -259,6 +273,7 @@ export function FormField({
           "aria-describedby": [descriptionId, errorId].filter(Boolean).join(" ") || undefined,
           "aria-invalid": shownError ? true : undefined,
           "aria-required": required || undefined,
+          disabled: disabled || undefined,
         },
         { labelId },
       )
@@ -276,6 +291,7 @@ export function FormField({
         // marked keeps its mark and this only fills the gap.
         "aria-invalid": element.props["aria-invalid"] ?? (shownError ? true : undefined),
         "aria-required": element.props["aria-required"] ?? (required || undefined),
+        disabled: element.props.disabled ?? (disabled || undefined),
       })
     : rendered;
 
@@ -340,11 +356,11 @@ export function FormField({
 
   // Only drawn when there is a second thing on the row. A label on its own is the row.
   const header =
-    help || actionSlot ? (
+    help || hasSlot(actionSlot) ? (
       <div data-slot="form-field-label-row" className="flex min-w-0 items-center gap-2">
         {labelNode}
         {help}
-        {actionSlot ? (
+        {hasSlot(actionSlot) ? (
           <div data-slot="form-field-action" className="ml-auto shrink-0">
             {actionSlot}
           </div>
@@ -354,12 +370,33 @@ export function FormField({
       labelNode
     );
 
+  const inlineDescription =
+    description && descriptionPlacement === "inline" ? (
+      <FieldDescription id={descriptionId} className={descriptionClassName}>
+        {description}
+      </FieldDescription>
+    ) : null;
+  // `FieldError` is already the `role="alert"` this shell used to draw by hand. Announcing matters
+  // more here than in shadcn's own forms: those sit downstream of react-hook-form, which moves
+  // focus to the first invalid field on a failed submit and gets the message read that way, and
+  // nothing in this shell moves focus.
+  const errorNode = shownError ? (
+    <FieldError id={errorId} className={errorClassName}>
+      {shownError}
+    </FieldError>
+  ) : null;
+
   const messages = (
     <>
-      {description && descriptionPlacement === "inline" ? (
-        <FieldDescription id={descriptionId} className={descriptionClassName}>
-          {description}
-        </FieldDescription>
+      {/* One column, so two lines of the field's text are the heading rhythm's 4px apart in both
+          orientations, and only text against the control is `Field`'s 8px. Stacked, the
+          description and the error were 8px apart, and 4px beside a checkbox. Drawn only when
+          there is a line in it: an empty box is still a gap in the column. */}
+      {inlineDescription || errorNode ? (
+        <div data-slot="form-field-messages" className={cn("flex min-w-0 flex-col", HEADING_GAP)}>
+          {inlineDescription}
+          {errorNode}
+        </div>
       ) : null}
       {/* Behind a popover, the text still has to exist somewhere permanent for the control to be
           described by — Radix unmounts popover content on close, so a description living only
@@ -368,23 +405,17 @@ export function FormField({
       {description && descriptionPlacement === "popover" ? (
         <DescriptionHintText id={descriptionId}>{description}</DescriptionHintText>
       ) : null}
-      {/* `FieldError` is already the `role="alert"` this shell used to draw by hand. Announcing
-          matters more here than in shadcn's own forms: those sit downstream of react-hook-form,
-          which moves focus to the first invalid field on a failed submit and gets the message
-          read that way, and nothing in this shell moves focus. */}
-      {shownError ? (
-        <FieldError id={errorId} className={errorClassName}>
-          {shownError}
-        </FieldError>
-      ) : null}
     </>
   );
 
   return (
     <Field
       orientation={orientation}
-      // `Field` turns the whole field destructive from this attribute, which is the primitive's
-      // own error state rather than one invented here.
+      // What fades the label and the description with the control.
+      disabled={shownDisabled}
+      // The mark shadcn's `Field` styles its error state from. This `Field` draws nothing from it
+      // (the control's `aria-invalid` and the `FieldError` say it); it is kept for a DOM app's own
+      // selector written against shadcn's.
       data-invalid={shownError ? true : undefined}
       // A checkbox or switch beside a caption with a description lines up with the caption's
       // first line, as on native, not with the middle of the two-line block.

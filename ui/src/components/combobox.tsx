@@ -14,7 +14,7 @@ import {
   type SelectSeparatorEntry,
   withOrphanOptions,
 } from "@/lib/select-options";
-import { cn } from "@/lib/utils";
+import { cn, fieldTriggerClass } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button, type ButtonProps } from "@/components/ui/button";
 import { ColorDot } from "@/components/ui/color-dot";
@@ -27,7 +27,7 @@ import {
   CommandList,
   CommandSeparator,
 } from "@/components/ui/command";
-import { Check, ChevronsUpDown, Plus, X } from "@/components/ui/icons";
+import { Check, ChevronDown, Plus, X } from "@/components/ui/icons";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   SelectContent,
@@ -75,8 +75,17 @@ type ComboboxSharedProps = Omit<
   ComponentProps<typeof SelectTrigger>,
   "value" | "onChange" | "type" | "children" | "className" | "disabled"
 > & {
+  /**
+   * On the trigger, the field-shaped button that opens the menu. The menu's own is
+   * `contentClassName`.
+   */
   className?: string | undefined;
+  /** The trigger cannot be pressed, and the field reads as unavailable. */
   disabled?: boolean | undefined;
+  /**
+   * What can be chosen: options, and the separators and notes between them, in the order they are
+   * listed. Each option's `value` is what `value` holds.
+   */
   options: readonly SelectEntry[];
   /** What the trigger says with nothing chosen. */
   placeholder?: string | undefined;
@@ -88,6 +97,9 @@ type ComboboxSharedProps = Omit<
    * form of twenty fields asks the server nothing for the eighteen the reader never touches.
    */
   open?: boolean | undefined;
+  /**
+   * Told when the menu opens or closes. Pass it with `open` to hold that state, or alone to listen.
+   */
   onOpenChange?: ((open: boolean) => void) | undefined;
   /** The dropdown's class. `className` still goes to the trigger, which is the control. */
   contentClassName?: string | undefined;
@@ -149,15 +161,27 @@ type ComboboxSharedProps = Omit<
 
 /** A combobox holding one value. */
 type ComboboxSingleProps = ComboboxSharedProps & {
+  /**
+   * Leave it out for a combobox that holds one value. `true` holds several, drawn as chips on the
+   * trigger, and makes `value` an array.
+   */
   multiple?: false | undefined;
+  /** The chosen option's `value`, or `undefined` for none. With `multiple`, every chosen value. */
   value?: string | undefined;
+  /**
+   * Told the new value when the reader picks a row. One value closes the menu on a pick; with
+   * `multiple` it is handed the whole new array and the menu stays open.
+   */
   onValueChange: (value: string) => void;
 };
 
 /** A combobox holding several. */
 type ComboboxMultipleProps = ComboboxSharedProps & {
+  /** Holds several values, drawn as chips on the trigger. */
   multiple: true;
+  /** Every chosen value. */
   value: readonly string[];
+  /** Handed the whole new array on every pick or removal; the menu stays open. */
   onValueChange: (value: string[]) => void;
   /**
    * Chips to draw before collapsing to a count. `0` always shows the count.
@@ -371,6 +395,7 @@ type SearchMenuProps = Pick<
   | "emptyMessage"
   | "onCreateOption"
   | "createLabel"
+  | "aria-invalid"
 > & {
   searchable: boolean;
   /** The values held: one or none for a single combobox. */
@@ -419,6 +444,7 @@ function SearchMenu({
   duplicateMessage = (text) => `“${text}” is already added.`,
   onRefusalChange,
   trigger,
+  "aria-invalid": ariaInvalid,
 }: SearchMenuProps) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -478,16 +504,17 @@ function SearchMenu({
           disabled={disabled}
           {...trigger}
           className={cn(
-            "h-auto min-h-10 w-full justify-between gap-2 bg-background px-3 py-1.5 font-normal",
-            // It looks like a field, so it behaves like one: no hover fill, and focus turns its
-            // border `active`, as the select trigger beside it does — not a button's fill.
-            "hover:bg-background focus-visible:bg-background focus-visible:border-active",
-            "whitespace-normal aria-invalid:border-negative aria-invalid:focus-visible:border-active disabled:cursor-not-allowed",
+            "h-auto min-h-10 w-full justify-between gap-2 px-3 py-1.5",
+            // It looks like a field, so it behaves like one, as the select trigger beside it does.
+            fieldTriggerClass(ariaInvalid),
+            "whitespace-normal",
             className,
           )}
           content={triggerSlot}
           trailingSlot={
-            <ChevronsUpDown className="size-4 shrink-0 text-foreground/60" aria-hidden />
+            // The select's chevron, not `ChevronsUpDown`: the two triggers are one field look, so
+            // the glyph that says a list opens from them is one glyph too (#485).
+            <ChevronDown className="size-4 shrink-0 text-foreground/60" aria-hidden />
           }
         />
       </PopoverTrigger>
@@ -654,6 +681,7 @@ function SingleCombobox({
           // The select trigger's props are the button's on the web and a subset of them on
           // device, so they are the same wiring on a different element.
           trigger={props as ButtonProps}
+          aria-invalid={props["aria-invalid"]}
           triggerSlot={
             chosen === undefined ? (
               <span className="cube-rn-text min-w-0 flex-1 truncate text-left text-foreground/60 text-sm">
@@ -793,6 +821,7 @@ function MultipleCombobox({
         duplicateMessage={duplicateMessage}
         onRefusalChange={onRefusalChange}
         trigger={props as ButtonProps}
+        aria-invalid={props["aria-invalid"]}
         triggerSlot={
           <div className="cube-rn-view min-w-0 flex-1 flex-row flex-wrap items-center gap-1">
             {chosen.length === 0 ? (

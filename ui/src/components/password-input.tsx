@@ -52,6 +52,8 @@ export function PasswordInput({
             variant="secondary"
             size="icon-xs"
             aria-label={visible ? hideLabel : showLabel}
+            // An eye in a password box needs no caption, and one would sit over the field (#425).
+            tooltip={false}
             disabled={disabled}
             onClick={() => setShown((was) => was === false)}
             content={visible ? <EyeOff /> : <Eye />}

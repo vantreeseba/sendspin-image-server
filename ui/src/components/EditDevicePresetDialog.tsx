@@ -15,8 +15,7 @@ export function EditDevicePresetDialog({ preset, open, onOpenChange, onSave }: P
       onOpenChange={onOpenChange}
       title="Edit preset"
       submitLabel="Save"
-      pendingLabel="Saving…"
-      submitVariant="positive"
+      loadingLabel="Saving…"
       initial={{
         name: preset.name,
         dither_algo: preset.dither_algo,
