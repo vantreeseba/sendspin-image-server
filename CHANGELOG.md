@@ -2,6 +2,22 @@
 
 <!-- version list -->
 
+## v2.3.0 (2026-11-22)
+
+### Features
+
+- **stream**: Fit images to a per-client byte budget
+  ([`82f7af5`](https://github.com/vantreeseba/sendspin-image-server/commit/82f7af503bc893bdc4b4293d9872f5419ae75fa7))
+
+### Refactoring
+
+- **ui**: Move submit buttons to cubeui's new prop names
+  ([`98f6f8d`](https://github.com/vantreeseba/sendspin-image-server/commit/98f6f8dd0db629799c8fee0a63bc1526a095e68a))
+
+- **ui**: Move to the renamed and replacement cubeui items
+  ([`b60452a`](https://github.com/vantreeseba/sendspin-image-server/commit/b60452ac036eafcf979ce09edd163b26e1186782))
+
+
 ## v2.2.0 (2026-10-09)
 
 ### Bug Fixes
