@@ -20,6 +20,7 @@ from aiosendspin.noise.trust_store import InMemoryClientPairingStore
 from aiosendspin.server import SendspinServer
 from PIL import Image
 
+from sendspin_image_server.defaults import IMAGE_ENCODING_DEFAULTS
 from sendspin_image_server.server import IDENTITY_FILE, SendspinImageServer
 
 TIMEOUT = 10
@@ -58,6 +59,7 @@ def _registry() -> MagicMock:
     """Return a registry that serves no client from an endpoint."""
     registry = MagicMock()
     registry.effective_endpoint_id.return_value = None
+    registry.client_max_image_bytes.return_value = IMAGE_ENCODING_DEFAULTS.max_image_bytes
     return registry
 
 

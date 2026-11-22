@@ -8,6 +8,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from sendspin_image_server.defaults import IMAGE_ENCODING_DEFAULTS
+
 if TYPE_CHECKING:
     from aiosendspin.server.roles.artwork import ArtworkRoleProtocol
 
@@ -32,6 +34,15 @@ class ArtworkChannel:
     channel_index: int = field(default=0, repr=False)
 
 
+@dataclass(frozen=True)
+class ImageDelivery:
+    """The outcome of the last image encoded for a client."""
+
+    # Encoded size in bytes: the image sent, or the smallest attempt if none fit.
+    size_bytes: int
+    delivered: bool
+
+
 def server_time_us() -> int:
     """Return current server monotonic time in microseconds."""
     return int(time.monotonic() * 1_000_000)
@@ -53,6 +64,9 @@ class ClientState:
     artwork: ArtworkRoleProtocol | None = field(default=None, repr=False)
     # Server clock the artwork timestamps are taken from.
     clock: Callable[[], int] = field(default=server_time_us, repr=False)
+    # Largest image this client is sent, in bytes.
+    max_image_bytes: int = IMAGE_ENCODING_DEFAULTS.max_image_bytes
+    last_delivery: ImageDelivery | None = None
 
     @property
     def artwork_channels(self) -> list[ArtworkChannel]:

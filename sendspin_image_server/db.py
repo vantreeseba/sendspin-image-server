@@ -30,6 +30,7 @@ clients
     client_id       TEXT PRIMARY KEY
     name            TEXT NOT NULL DEFAULT ''
     last_known_url  TEXT          -- last WebSocket URL we successfully connected to
+    max_image_bytes INTEGER       -- largest image it is sent; NULL = server default
 """
 
 from __future__ import annotations
@@ -73,7 +74,8 @@ CREATE TABLE IF NOT EXISTS clients (
     client_id      TEXT PRIMARY KEY,
     name           TEXT NOT NULL DEFAULT '',
     last_known_url TEXT,
-    locked         INTEGER NOT NULL DEFAULT 0
+    locked         INTEGER NOT NULL DEFAULT 0,
+    max_image_bytes INTEGER
 );
 """
 
@@ -84,6 +86,7 @@ _MIGRATION_ADD_PALETTE = (
 _MIGRATION_ADD_LAST_KNOWN_URL = "ALTER TABLE clients ADD COLUMN last_known_url TEXT"
 _MIGRATION_ADD_PRESET_ID = "ALTER TABLE assignments ADD COLUMN preset_id TEXT"
 _MIGRATION_ADD_LOCKED = "ALTER TABLE clients ADD COLUMN locked INTEGER NOT NULL DEFAULT 0"
+_MIGRATION_ADD_MAX_IMAGE_BYTES = "ALTER TABLE clients ADD COLUMN max_image_bytes INTEGER"
 
 
 class Database:
@@ -105,6 +108,7 @@ class Database:
             _MIGRATION_ADD_LAST_KNOWN_URL,
             _MIGRATION_ADD_PRESET_ID,
             _MIGRATION_ADD_LOCKED,
+            _MIGRATION_ADD_MAX_IMAGE_BYTES,
         ):
             try:
                 await self._db.execute(migration)
@@ -323,11 +327,11 @@ class Database:
         )
         await self._db.commit()
 
-    async def load_client_urls(self) -> dict[str, dict[str, str | bool | None]]:
-        """Return {client_id: {name, last_known_url, locked}} for all persisted clients."""
+    async def load_client_urls(self) -> dict[str, dict[str, str | bool | int | None]]:
+        """Return {client_id: {name, last_known_url, locked, max_image_bytes}} for all clients."""
         assert self._db is not None
         async with self._db.execute(
-            "SELECT client_id, name, last_known_url, locked FROM clients"
+            "SELECT client_id, name, last_known_url, locked, max_image_bytes FROM clients"
         ) as cur:
             rows = await cur.fetchall()
         return {
@@ -335,9 +339,25 @@ class Database:
                 "name": row["name"],
                 "last_known_url": row["last_known_url"],
                 "locked": bool(row["locked"]),
+                "max_image_bytes": row["max_image_bytes"],
             }
             for row in rows
         }
+
+    async def set_client_max_image_bytes(
+        self, client_id: str, max_image_bytes: int | None
+    ) -> None:
+        """Set a client's image byte budget, or clear it with None (upsert)."""
+        assert self._db is not None
+        await self._db.execute(
+            """
+            INSERT INTO clients (client_id, max_image_bytes)
+            VALUES (?, ?)
+            ON CONFLICT(client_id) DO UPDATE SET max_image_bytes=excluded.max_image_bytes
+            """,
+            (client_id, max_image_bytes),
+        )
+        await self._db.commit()
 
     async def set_client_locked(self, client_id: str, *, locked: bool) -> None:
         """Set the locked flag for a client (upsert — creates the row if absent)."""

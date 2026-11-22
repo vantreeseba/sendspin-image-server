@@ -39,6 +39,13 @@ from typing import Final, Literal
 import numpy as np
 from PIL import Image, ImageEnhance
 
+from sendspin_image_server.defaults import IMAGE_ENCODING_DEFAULTS
+
+# Pillow's value for 4:4:4 chroma, which keeps full color resolution.
+_SUBSAMPLING_444: Final = 0
+# The most colors a PNG palette can hold.
+_MAX_INDEXED_COLORS: Final = 256
+
 logger = logging.getLogger(__name__)
 
 _TABLES_DIR: Final[pathlib.Path] = pathlib.Path(__file__).parent / "tables"
@@ -442,14 +449,41 @@ def dither_to_pil(
 
 
 def encode_pil(pil_img: Image.Image, orig_format: str) -> bytes:
-    """Encode a PIL RGB image to *orig_format* bytes."""
+    """Encode a PIL RGB image to *orig_format* bytes.
+
+    A PNG of at most 256 colors is saved as an indexed PNG, with every color kept exactly.
+    """
     buf = io.BytesIO()
-    kwargs: dict[str, object] = {}
-    if orig_format.upper() == "JPEG":
-        kwargs["quality"] = 95
-        kwargs["subsampling"] = 0
-    pil_img.save(buf, format=orig_format, **kwargs)
+    normalized_format = orig_format.upper()
+    if normalized_format == "JPEG":
+        pil_img.save(
+            buf,
+            format="JPEG",
+            quality=IMAGE_ENCODING_DEFAULTS.jpeg_quality,
+            subsampling=_SUBSAMPLING_444,
+        )
+    elif normalized_format == "PNG":
+        (_as_indexed(pil_img) or pil_img).save(buf, format="PNG", optimize=True)
+    else:
+        pil_img.save(buf, format=orig_format)
     return buf.getvalue()
+
+
+def _as_indexed(pil_img: Image.Image) -> Image.Image | None:
+    """Return *pil_img* as an exact palette image, or None if it has too many colors."""
+    rgb = np.asarray(pil_img.convert("RGB"), dtype=np.uint32)
+    packed = (rgb[:, :, 0] << 16) | (rgb[:, :, 1] << 8) | rgb[:, :, 2]
+    colors, indices = np.unique(packed, return_inverse=True)
+    if len(colors) > _MAX_INDEXED_COLORS:
+        return None
+
+    indexed = Image.fromarray(indices.reshape(packed.shape).astype(np.uint8))
+    indexed.putpalette(
+        [channel for color in colors.tolist() for channel in (
+            color >> 16, (color >> 8) & 0xFF, color & 0xFF
+        )]
+    )
+    return indexed
 
 
 def dither_to_bytes(

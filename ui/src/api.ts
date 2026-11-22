@@ -47,6 +47,21 @@ export async function setClientInterval(clientId: string, interval: number): Pro
   }
 }
 
+/** Pass `null` to go back to the server's default budget. */
+export async function setClientMaxImageBytes(
+  clientId: string,
+  maxImageBytes: number | null,
+): Promise<void> {
+  const r = await fetch(`${BASE}/api/clients/${encodeURIComponent(clientId)}/max-image-bytes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ max_image_bytes: maxImageBytes }),
+  });
+  if (!r.ok) {
+    throw new Error(await r.text());
+  }
+}
+
 export async function setClientDither(clientId: string, algo: DitheringAlgo): Promise<void> {
   const r = await fetch(`${BASE}/api/clients/${encodeURIComponent(clientId)}/dither`, {
     method: 'POST',

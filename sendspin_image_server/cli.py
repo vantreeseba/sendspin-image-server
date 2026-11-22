@@ -583,6 +583,29 @@ async def run(  # noqa: C901, PLR0913, PLR0915
         registry.set_client_interval(client_id, interval)
         return web.Response(status=204)
 
+    async def api_set_client_max_image_bytes(request: web.Request) -> web.Response:
+        """POST /api/clients/{id}/max-image-bytes  body: {max_image_bytes: int | null}."""
+        client_id = request.match_info["id"]
+        try:
+            body = await request.json()
+        except ValueError:
+            return web.Response(status=400, text="Invalid JSON")
+        if "max_image_bytes" not in body:
+            return web.Response(status=400, text="'max_image_bytes' is required")
+        max_image_bytes = body["max_image_bytes"]
+        is_positive_integer = (
+            isinstance(max_image_bytes, int)
+            and not isinstance(max_image_bytes, bool)
+            and max_image_bytes > 0
+        )
+        if max_image_bytes is not None and not is_positive_integer:
+            return web.Response(
+                status=400,
+                text="'max_image_bytes' must be a positive integer, or null for the default",
+            )
+        registry.set_client_max_image_bytes(client_id, max_image_bytes)
+        return web.Response(status=204)
+
     async def api_get_client_debug_image(request: web.Request) -> web.Response:
         """GET /api/clients/{id}/debug-image — return the last image pushed to this client."""
         client_id = request.match_info["id"]
@@ -736,6 +759,7 @@ async def run(  # noqa: C901, PLR0913, PLR0915
     app.router.add_post("/api/clients/{id}/dither", api_set_client_dither)
     app.router.add_post("/api/clients/{id}/palette", api_set_client_palette)
     app.router.add_post("/api/clients/{id}/interval", api_set_client_interval)
+    app.router.add_post("/api/clients/{id}/max-image-bytes", api_set_client_max_image_bytes)
     app.router.add_post("/api/clients/{id}/push", api_push_client_image)
     app.router.add_post("/api/clients/{id}/lock", api_lock_client)
     app.router.add_post("/api/clients/{id}/connect", api_connect_client)
