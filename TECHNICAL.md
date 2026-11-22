@@ -193,8 +193,12 @@ Inside `push_image_to_client` (`stream.py`):
 
 1. **Resize** — the image is scaled to fit within the dimensions the client declared for the channel (letterboxed on a white canvas using Lanczos resampling — the spec asks for black bars, but white suits e-paper).
 2. **Dither** — if `force_e6_dither=True` (set from the client's dither settings), `floyd_steinberg_e6()` is called with the configured algorithm and palette.
-3. **Re-encode** — even without dithering, the image is re-encoded to the wire format the client's channel declared (`jpeg`, `png`, or `bmp`).
-4. **Send** — `ClientState.send_artwork()` passes the bytes to aiosendspin, which frames them for the protocol version the client speaks.
+3. **Encode within budget** — the image is encoded to the format the client's channel declared (`jpeg`, `png`, or `bmp`), at no more than the client's max image size (default 128 KiB). The protocol has no way for a client to declare this limit ([#14](https://github.com/vantreeseba/sendspin-image-server/issues/14)), so it is set per client in the UI. `encode_to_budget` (`encode.py`) stops at the first step that fits:
+   - **JPEG:** quality 95, then lower qualities with 4:2:0 chroma.
+   - **Dithered PNG:** an exact indexed PNG, then the dither redrawn with 2px and 4px dots at the same image size.
+   - **Other PNG:** full color, then 256, 64 and 16 colors.
+   - **BMP:** exempt, since it has nothing to reduce and only legacy clients declare it.
+4. **Send** — `ClientState.send_artwork()` passes the bytes to aiosendspin, which frames them for the protocol version the client speaks. If no step fits, nothing is sent, the display keeps its current image, and the client card shows a warning.
 
 All CPU-bound image work (resize, dither, encode) runs in the default thread pool executor via `loop.run_in_executor` to avoid blocking the event loop.
 

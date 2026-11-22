@@ -38,6 +38,7 @@ from aiosendspin.server.roles.metadata import Metadata, MetadataGroupRole
 from aiosendspin.server.roles.registry import register_group_role, register_role
 
 from sendspin_image_server.client import ClientState
+from sendspin_image_server.defaults import IMAGE_ENCODING_DEFAULTS
 from sendspin_image_server.dither import DitheringAlgo, DitheringPalette
 from sendspin_image_server.stream import (
     push_image_to_client,
@@ -474,6 +475,11 @@ class SendspinImageServer:
             active_roles=client.active_role_ids,
             artwork=artwork,
             clock=self._sendspin.clock.now_us,
+            max_image_bytes=(
+                self._registry.client_max_image_bytes(client.client_id)
+                if self._registry is not None
+                else IMAGE_ENCODING_DEFAULTS.max_image_bytes
+            ),
         )
 
     def _on_artwork_stream_started(self, group: SendspinGroup, role: ArtworkRoleProtocol) -> None:

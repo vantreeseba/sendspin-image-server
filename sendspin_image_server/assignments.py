@@ -8,6 +8,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
+from sendspin_image_server.defaults import IMAGE_ENCODING_DEFAULTS
 from sendspin_image_server.dither import DitheringAlgo, DitheringPalette
 from sendspin_image_server.endpoints import ImageEndpoint
 from sendspin_image_server.tasks import spawn
@@ -56,6 +57,8 @@ class ClientAssignmentManager:
         self._client_interval: dict[str, float] = {}
         self._client_last_url: dict[str, str] = {}
         self._client_locked: dict[str, bool] = {}
+        # client_id → byte budget set for it; a device limit, so presets leave it alone
+        self._client_max_image_bytes: dict[str, int] = {}
         self._tasks: dict[str, asyncio.Task[None]] = {}
         # endpoint_id → event that makes its feed loop look at the clients right away
         self._feed_wake: dict[str, asyncio.Event] = {}
@@ -160,6 +163,28 @@ class ClientAssignmentManager:
             )
         logger.info(
             "Client %s interval set to %ss", client_id, interval if interval > 0 else "default"
+        )
+
+    def set_client_max_image_bytes(self, client_id: str, max_image_bytes: int | None) -> None:
+        """Set the largest image a client is sent, or None for the server default."""
+        if max_image_bytes is None:
+            self._client_max_image_bytes.pop(client_id, None)
+        else:
+            self._client_max_image_bytes[client_id] = max_image_bytes
+        connected_client = self._server.clients.get(client_id)
+        if connected_client is not None:
+            connected_client.max_image_bytes = self.client_max_image_bytes(client_id)
+        if self._db is not None:
+            spawn(
+                self._db.set_client_max_image_bytes(client_id, max_image_bytes),
+                f"set_client_max_image_bytes({client_id})",
+            )
+        logger.info("Client %s max image bytes set to %s", client_id, max_image_bytes)
+
+    def client_max_image_bytes(self, client_id: str) -> int:
+        """Return the largest image a client is sent, in bytes."""
+        return self._client_max_image_bytes.get(
+            client_id, IMAGE_ENCODING_DEFAULTS.max_image_bytes
         )
 
     def assign_preset_to_client(self, client_id: str, preset_id: str | None) -> None:
@@ -309,6 +334,7 @@ class ClientAssignmentManager:
         self._preset_assignments.pop(client_id, None)
         self._client_last_url.pop(client_id, None)
         self._client_locked.pop(client_id, None)
+        self._client_max_image_bytes.pop(client_id, None)
         self._client_names.pop(client_id, None)
         self._last_seen.pop(client_id, None)
         self._wake_interval.pop(client_id, None)
@@ -362,6 +388,13 @@ class ClientAssignmentManager:
                     "discovered_only": False,
                     "mdns_name": None,
                     "locked": self.is_client_locked(client.client_id),
+                    "last_image_bytes": (
+                        client.last_delivery.size_bytes if client.last_delivery else None
+                    ),
+                    "last_image_over_budget": (
+                        client.last_delivery is not None
+                        and client.last_delivery.delivered is False
+                    ),
                 }
             )
 
@@ -452,7 +485,11 @@ class ClientAssignmentManager:
         for entry in offline_db + discovered_only:
             entry.update(self._presence(entry["id"], connected=False))
             entry["name"] = self._client_names.get(entry["id"], entry["name"])
-        return connected + offline_db + discovered_only
+        all_entries = connected + offline_db + discovered_only
+        for entry in all_entries:
+            entry["max_image_bytes"] = self.client_max_image_bytes(entry["id"])
+            entry["max_image_bytes_override"] = self._client_max_image_bytes.get(entry["id"])
+        return all_entries
 
     # ---- Lifecycle ----
 
@@ -476,6 +513,10 @@ class ClientAssignmentManager:
     def restore_client_locked(self, client_id: str) -> None:
         """Mark a client as locked from persisted state."""
         self._client_locked[client_id] = True
+
+    def restore_client_max_image_bytes(self, client_id: str, max_image_bytes: int) -> None:
+        """Seed a client's image byte budget from persisted state."""
+        self._client_max_image_bytes[client_id] = max_image_bytes
 
     def restore_device_preset(self, preset_id: str, preset: DevicePreset) -> None:
         """Seed a device preset from persisted state."""

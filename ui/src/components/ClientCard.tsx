@@ -11,6 +11,7 @@ import {
   setClientDither,
   setClientInterval,
   setClientLocked,
+  setClientMaxImageBytes,
   setClientPalette,
 } from '@/api';
 import { ClientDebugPreviewDialog } from '@/components/ClientDebugPreviewDialog';
@@ -25,7 +26,7 @@ import { Button } from '@/components/ui/button';
 import { Eye, Lock } from '@/components/ui/icons';
 import { Input } from '@/components/ui/input';
 import { ALGO_OPTIONS, PALETTE_OPTIONS } from '@/lib/dither-options';
-import { formatAgo, formatDuration } from '@/lib/format';
+import { formatAgo, formatBytes, formatDuration } from '@/lib/format';
 import type { SelectOption } from '@/lib/select-options';
 import type { Client, DevicePreset, DitheringAlgo, DitheringPalette, Endpoint } from '@/types';
 
@@ -37,6 +38,8 @@ interface Props {
 
 /** Stands in for "no preset" in the select, whose values are strings. */
 const NO_PRESET = 'none';
+
+const BYTES_PER_KB = 1024;
 
 const CLIENT_ALGO_OPTIONS: SelectOption[] = [{ value: 'none', label: 'None' }, ...ALGO_OPTIONS];
 
@@ -82,6 +85,11 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
   const [intervalInput, setIntervalInput] = useState(
     client.interval > 0 ? String(client.interval) : '',
   );
+  const [maxImageKbInput, setMaxImageKbInput] = useState(
+    client.max_image_bytes_override === null
+      ? ''
+      : String(client.max_image_bytes_override / BYTES_PER_KB),
+  );
   const [busy, setBusy] = useState(false);
   const [pushing, setPushing] = useState(false);
   const [connecting, setConnecting] = useState(false);
@@ -95,6 +103,11 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
   const parsedInterval = intervalInput === '' ? 0 : Number(intervalInput);
   const intervalValid =
     intervalInput === '' || (!Number.isNaN(parsedInterval) && parsedInterval >= 0);
+  const parsedMaxImageBytes =
+    maxImageKbInput === '' ? null : Math.round(Number(maxImageKbInput) * BYTES_PER_KB);
+  const maxImageValid =
+    parsedMaxImageBytes === null ||
+    (Number.isFinite(parsedMaxImageBytes) && parsedMaxImageBytes > 0);
 
   // Load presets for the preset selector
   useEffect(() => {
@@ -120,10 +133,11 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
     selectedAlgo !== client.dither_algo ||
     selectedPalette !== client.dither_palette ||
     selectedPreset !== clientPreset ||
-    parsedInterval !== client.interval;
+    parsedInterval !== client.interval ||
+    parsedMaxImageBytes !== client.max_image_bytes_override;
 
   async function handleUpdate() {
-    if (!intervalValid) {
+    if (!intervalValid || !maxImageValid) {
       return;
     }
     setBusy(true);
@@ -145,6 +159,10 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
 
       if (parsedInterval !== client.interval) {
         tasks.push(setClientInterval(client.id, parsedInterval));
+      }
+
+      if (parsedMaxImageBytes !== client.max_image_bytes_override) {
+        tasks.push(setClientMaxImageBytes(client.id, parsedMaxImageBytes));
       }
 
       if (selectedPreset !== clientPreset) {
@@ -291,6 +309,12 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
                     />
                   )}
                   {ch && <PropertyRow label="Format" value={ch.format ?? '—'} />}
+                  {client.last_image_bytes != null && (
+                    <PropertyRow
+                      label="Last image"
+                      value={`${formatBytes(client.last_image_bytes)} of ${formatBytes(client.max_image_bytes)}`}
+                    />
+                  )}
                   <PropertyRow label="Provider" value={providerLabel} />
                   <PropertyRow
                     label="Interval"
@@ -372,6 +396,34 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
               </>
             )}
 
+            {/* A limit of the device itself, so it stays visible when a preset is active */}
+            {!isDiscovered && (
+              <FormField
+                label="Max image size"
+                description="Must not exceed the device's image buffer. Blank uses the server default."
+                error={maxImageValid ? undefined : 'Use a size above 0.'}
+                controlSlot={
+                  <Input
+                    type="number"
+                    min={1}
+                    step={1}
+                    suffixText="KB"
+                    placeholder="Server default"
+                    value={maxImageKbInput}
+                    onChangeText={setMaxImageKbInput}
+                  />
+                }
+              />
+            )}
+
+            {client.last_image_over_budget && (
+              <Alert
+                variant="warning"
+                title="Last image was not sent"
+                description="Even its smallest encoding was over this client's max image size, so the display kept its current image."
+              />
+            )}
+
             {err && <Alert variant="destructive" title="Something went wrong" description={err} />}
           </>
         }
@@ -404,7 +456,7 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
                 content="Update"
                 loading={busy}
                 loadingLabel="Saving…"
-                disabled={!isDirty || !intervalValid}
+                disabled={!isDirty || !intervalValid || !maxImageValid}
                 onClick={handleUpdate}
               />
             )}

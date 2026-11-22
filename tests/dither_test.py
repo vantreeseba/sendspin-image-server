@@ -454,7 +454,8 @@ class TestEncodePil:
         img = Image.new("RGB", (10, 10), (128, 64, 32))
         result = encode_pil(img, "PNG")
         decoded = Image.open(io.BytesIO(result))
-        assert decoded.mode == "RGB"
+        assert decoded.format == "PNG"
+        assert decoded.convert("RGB").getpixel((0, 0)) == (128, 64, 32)
 
     def test_preserves_dimensions(self):
         img = Image.new("RGB", (50, 100), (128, 64, 32))
@@ -477,7 +478,7 @@ class TestDitherToBytes:
     def test_output_is_valid_png(self, solid_jpeg: bytes):
         result = dither_to_bytes(solid_jpeg, "floyd-steinberg", "png", "e6")
         decoded = Image.open(io.BytesIO(result))
-        assert decoded.mode == "RGB"
+        assert decoded.format == "PNG"
 
     def test_output_is_valid_jpeg(self, solid_jpeg: bytes):
         result = dither_to_bytes(solid_jpeg, "floyd-steinberg", "jpeg", "e6")
@@ -499,10 +500,10 @@ class TestDitherToBytes:
         decoded = Image.open(io.BytesIO(result))
         assert decoded.size == (100, 100)
 
-    def test_none_algo_no_palette_produces_rgb(self, solid_jpeg: bytes):
+    def test_none_algo_no_palette_produces_png(self, solid_jpeg: bytes):
         result = dither_to_bytes(solid_jpeg, "none", "png", "e6")
         decoded = Image.open(io.BytesIO(result))
-        assert decoded.mode == "RGB"
+        assert decoded.format == "PNG"
 
     def test_bayer_offsets_are_correct_8x8(self):
         assert len(_BAYER_OFFSETS) == 8

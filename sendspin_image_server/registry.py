@@ -284,6 +284,12 @@ class EndpointRegistry:
     def client_interval(self, client_id: str) -> float:
         return self._assignments.client_interval(client_id)
 
+    def set_client_max_image_bytes(self, client_id: str, max_image_bytes: int | None) -> None:
+        self._assignments.set_client_max_image_bytes(client_id, max_image_bytes)
+
+    def client_max_image_bytes(self, client_id: str) -> int:
+        return self._assignments.client_max_image_bytes(client_id)
+
     def unassign(self, client_id: str) -> None:
         self._assignments.unassign(client_id)
 
@@ -336,6 +342,9 @@ class EndpointRegistry:
                 self._assignments.restore_client_url(cid, str(url))
             if data.get("locked"):
                 self._assignments.restore_client_locked(cid)
+            max_image_bytes = data.get("max_image_bytes")
+            if isinstance(max_image_bytes, int):
+                self._assignments.restore_client_max_image_bytes(cid, max_image_bytes)
 
         # Restore endpoints (same logic as old registry.py)
         rows = await db.load_endpoints()

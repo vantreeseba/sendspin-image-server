@@ -66,6 +66,10 @@ export interface Client {
   wake_interval?: number | null; // seconds it was last away before coming back
   sleeping?: boolean; // offline, but on a sleep cycle and expected back
   last_sent_at?: number | null; // epoch seconds of the last image sent to it; null if none yet
+  max_image_bytes: number; // largest image it is sent, in bytes
+  max_image_bytes_override: number | null; // the budget set for it; null = server default
+  last_image_bytes?: number | null; // bytes of the last image, or its smallest attempt if unsent
+  last_image_over_budget?: boolean; // no encoding of the last image fit the budget
 }
 
 export interface Endpoint {
