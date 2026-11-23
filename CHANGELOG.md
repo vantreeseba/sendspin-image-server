@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v2.4.0 (2026-11-23)
+
+### Bug Fixes
+
+- **server**: Make forget remove connected clients
+  ([`bab878e`](https://github.com/vantreeseba/sendspin-image-server/commit/bab878e2969da986eefe092f7163e1ec6b5aed06))
+
+### Features
+
+- **clients**: Block forgotten clients by default
+  ([`ba0e48e`](https://github.com/vantreeseba/sendspin-image-server/commit/ba0e48ed02d549fca97d1b0d51f650477f60001f))
+
+
 ## v2.3.0 (2026-11-22)
 
 ### Features
