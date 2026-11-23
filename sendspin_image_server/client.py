@@ -43,6 +43,26 @@ class ImageDelivery:
     delivered: bool
 
 
+@dataclass(frozen=True)
+class BlockedClient:
+    """A client the server refuses to dial or keep connected."""
+
+    client_id: str
+    name: str
+    url: str | None = None
+    mdns_name: str | None = None
+
+    def matches_address(self, url: str, mdns_name: str | None = None) -> bool:
+        """Whether a discovered address is this client.
+
+        The mDNS name wins when both sides have one, because a different
+        device can later be given this client's IP address.
+        """
+        if self.mdns_name is not None and mdns_name is not None:
+            return self.mdns_name == mdns_name
+        return self.url == url
+
+
 def server_time_us() -> int:
     """Return current server monotonic time in microseconds."""
     return int(time.monotonic() * 1_000_000)

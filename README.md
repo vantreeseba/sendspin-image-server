@@ -117,7 +117,7 @@ Hit **Update** to apply any changes.
 Two additional buttons appear on displays that are not currently connected:
 
 - **Force Connect** — tells the server to try reconnecting to that display immediately, using the last known address
-- **Forget** — removes the display from the server's memory entirely (useful for displays you no longer have)
+- **Forget** — removes the display from the server's memory and, unless you untick **Block this client**, keeps it from coming back. Blocked displays are listed under **Settings → Blocked Clients**, where you can unblock them
 
 ### Image Providers panel
 

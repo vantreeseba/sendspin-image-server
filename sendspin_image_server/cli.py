@@ -12,8 +12,10 @@ import pathlib
 import signal
 import tempfile
 import uuid
+from dataclasses import asdict
 from typing import Any
 
+from sendspin_image_server.client import BlockedClient
 from sendspin_image_server.db import Database
 from sendspin_image_server.dither import (
     DITHER_ALGOS,
@@ -708,14 +710,39 @@ async def run(  # noqa: C901, PLR0913, PLR0915
         return web.Response(status=204)
 
     async def api_delete_client(request: web.Request) -> web.Response:
-        """DELETE /api/clients/{id} — forget a client entirely."""
+        """DELETE /api/clients/{id}[?block=false] — forget a client, and block it by default."""
         client_id = request.match_info["id"]
         clients = registry.client_info()
         entry = next((c for c in clients if c["id"] == client_id), None)
         if entry is None:
             return web.Response(status=404, text="Client not found")
-        await server.forget_client(client_id, entry.get("discovered_url"))
+        known_url = entry.get("discovered_url")
+        if request.query.get("block", "true") != "false":
+            # Blocked first, so it cannot reconnect while it is being forgotten.
+            url, mdns_name = server.client_address(client_id, known_url)
+            registry.block_client(
+                BlockedClient(
+                    client_id=client_id,
+                    name=entry["name"],
+                    url=url,
+                    mdns_name=entry.get("mdns_name") or mdns_name,
+                )
+            )
+        await server.forget_client(client_id, known_url)
         registry.delete_client(client_id)
+        return web.Response(status=204)
+
+    async def api_list_blocked_clients(_request: web.Request) -> web.Response:
+        """GET /api/blocked-clients — list the clients the server refuses."""
+        return web.json_response([asdict(blocked) for blocked in registry.blocked_clients()])
+
+    async def api_unblock_client(request: web.Request) -> web.Response:
+        """DELETE /api/blocked-clients/{id} — allow a client again and dial it if possible."""
+        blocked = registry.unblock_client(request.match_info["id"])
+        if blocked is None:
+            return web.Response(status=404, text="Client is not blocked")
+        if blocked.url:
+            server.connect_to_client(blocked.url, mdns_name=blocked.mdns_name)
         return web.Response(status=204)
 
     # ------------------------------------------------------------------
@@ -763,6 +790,8 @@ async def run(  # noqa: C901, PLR0913, PLR0915
     app.router.add_post("/api/clients/{id}/connect", api_connect_client)
     app.router.add_get("/api/clients/{id}/debug-image", api_get_client_debug_image)
     app.router.add_delete("/api/clients/{id}", api_delete_client)
+    app.router.add_get("/api/blocked-clients", api_list_blocked_clients)
+    app.router.add_delete("/api/blocked-clients/{id}", api_unblock_client)
 
     runner = web.AppRunner(app)
     await runner.setup()

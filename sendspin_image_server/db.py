@@ -77,6 +77,13 @@ CREATE TABLE IF NOT EXISTS clients (
     locked         INTEGER NOT NULL DEFAULT 0,
     max_image_bytes INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS blocked_clients (
+    client_id TEXT PRIMARY KEY,
+    name      TEXT NOT NULL DEFAULT '',
+    url       TEXT,
+    mdns_name TEXT
+);
 """
 
 # Migrations applied separately (ALTER TABLE is idempotent via try/except)
@@ -378,3 +385,35 @@ class Database:
         await self._db.execute("DELETE FROM assignments WHERE client_id = ?", (client_id,))
         await self._db.execute("DELETE FROM clients WHERE client_id = ?", (client_id,))
         await self._db.commit()
+
+    # ------------------------------------------------------------------
+    # Blocked clients
+    # ------------------------------------------------------------------
+
+    async def save_blocked_client(
+        self, client_id: str, name: str, url: str | None, mdns_name: str | None
+    ) -> None:
+        assert self._db is not None
+        await self._db.execute(
+            """
+            INSERT INTO blocked_clients (client_id, name, url, mdns_name)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(client_id) DO UPDATE SET
+                name=excluded.name, url=excluded.url, mdns_name=excluded.mdns_name
+            """,
+            (client_id, name, url, mdns_name),
+        )
+        await self._db.commit()
+
+    async def delete_blocked_client(self, client_id: str) -> None:
+        assert self._db is not None
+        await self._db.execute("DELETE FROM blocked_clients WHERE client_id = ?", (client_id,))
+        await self._db.commit()
+
+    async def load_blocked_clients(self) -> list[dict[str, Any]]:
+        """Return every blocked client as a dict."""
+        assert self._db is not None
+        async with self._db.execute(
+            "SELECT client_id, name, url, mdns_name FROM blocked_clients"
+        ) as cursor:
+            return [dict(row) for row in await cursor.fetchall()]

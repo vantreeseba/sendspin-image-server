@@ -1,4 +1,5 @@
 import type {
+  BlockedClient,
   Client,
   DevicePreset,
   DitheringAlgo,
@@ -114,8 +115,25 @@ export async function deleteEndpoint(id: string): Promise<void> {
   }
 }
 
-export async function deleteClient(clientId: string): Promise<void> {
-  const r = await fetch(`${BASE}/api/clients/${encodeURIComponent(clientId)}`, {
+export async function deleteClient(clientId: string, block: boolean): Promise<void> {
+  const r = await fetch(`${BASE}/api/clients/${encodeURIComponent(clientId)}?block=${block}`, {
+    method: 'DELETE',
+  });
+  if (!r.ok) {
+    throw new Error(await r.text());
+  }
+}
+
+export async function getBlockedClients(): Promise<BlockedClient[]> {
+  const r = await fetch(`${BASE}/api/blocked-clients`);
+  if (!r.ok) {
+    throw new Error(await r.text());
+  }
+  return r.json() as Promise<BlockedClient[]>;
+}
+
+export async function unblockClient(clientId: string): Promise<void> {
+  const r = await fetch(`${BASE}/api/blocked-clients/${encodeURIComponent(clientId)}`, {
     method: 'DELETE',
   });
   if (!r.ok) {

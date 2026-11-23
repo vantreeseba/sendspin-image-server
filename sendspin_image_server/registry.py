@@ -7,6 +7,7 @@ import pathlib
 from typing import TYPE_CHECKING, Any
 
 from sendspin_image_server.assignments import ClientAssignmentManager
+from sendspin_image_server.client import BlockedClient
 from sendspin_image_server.dither import DitheringAlgo, DitheringPalette
 from sendspin_image_server.endpoints import (
     CalibrationEndpoint,
@@ -314,6 +315,23 @@ class EndpointRegistry:
     def locked_clients_with_urls(self) -> list[tuple[str, str]]:
         return self._assignments.locked_clients_with_urls()
 
+    # -- block list --
+
+    def block_client(self, blocked: BlockedClient) -> None:
+        self._assignments.block_client(blocked)
+
+    def unblock_client(self, client_id: str) -> BlockedClient | None:
+        return self._assignments.unblock_client(client_id)
+
+    def is_client_blocked(self, client_id: str) -> bool:
+        return self._assignments.is_client_blocked(client_id)
+
+    def is_address_blocked(self, url: str, mdns_name: str | None = None) -> bool:
+        return self._assignments.is_address_blocked(url, mdns_name)
+
+    def blocked_clients(self) -> list[BlockedClient]:
+        return self._assignments.blocked_clients()
+
     # -- effective values --
 
     def effective_endpoint_id(self, client_id: str) -> str | None:
@@ -329,12 +347,8 @@ class EndpointRegistry:
 
     # -- restore --
 
-    async def restore_from_db(self, builtin_endpoint_id: str) -> None:
-        if self._assignments.db is None:
-            return
-        db = self._assignments.db
-
-        # Restore client last-known URLs and locked state
+    async def _restore_clients(self, db: Database) -> None:
+        """Restore client URLs, locks, byte budgets and the block list."""
         client_urls = await db.load_client_urls()
         for cid, data in client_urls.items():
             url = data.get("last_known_url")
@@ -345,6 +359,15 @@ class EndpointRegistry:
             max_image_bytes = data.get("max_image_bytes")
             if isinstance(max_image_bytes, int):
                 self._assignments.restore_client_max_image_bytes(cid, max_image_bytes)
+
+        for row in await db.load_blocked_clients():
+            self._assignments.restore_blocked_client(BlockedClient(**row))
+
+    async def restore_from_db(self, builtin_endpoint_id: str) -> None:
+        if self._assignments.db is None:
+            return
+        db = self._assignments.db
+        await self._restore_clients(db)
 
         # Restore endpoints (same logic as old registry.py)
         rows = await db.load_endpoints()

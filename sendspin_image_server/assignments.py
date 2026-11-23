@@ -8,6 +8,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
+from sendspin_image_server.client import BlockedClient
 from sendspin_image_server.defaults import IMAGE_ENCODING_DEFAULTS
 from sendspin_image_server.dither import DitheringAlgo, DitheringPalette
 from sendspin_image_server.endpoints import ImageEndpoint
@@ -59,6 +60,7 @@ class ClientAssignmentManager:
         self._client_locked: dict[str, bool] = {}
         # client_id → byte budget set for it; a device limit, so presets leave it alone
         self._client_max_image_bytes: dict[str, int] = {}
+        self._blocked_clients: dict[str, BlockedClient] = {}
         self._tasks: dict[str, asyncio.Task[None]] = {}
         # endpoint_id → event that makes its feed loop look at the clients right away
         self._feed_wake: dict[str, asyncio.Event] = {}
@@ -341,6 +343,49 @@ class ClientAssignmentManager:
         self._client_names.pop(client_id, None)
         self._last_seen.pop(client_id, None)
         self._wake_interval.pop(client_id, None)
+
+    # ---- Block list ----
+
+    def block_client(self, blocked: BlockedClient) -> None:
+        """Refuse this client from now on, across restarts."""
+        self._blocked_clients[blocked.client_id] = blocked
+        if self._db is not None:
+            spawn(
+                self._db.save_blocked_client(
+                    blocked.client_id, blocked.name, blocked.url, blocked.mdns_name
+                ),
+                f"save_blocked_client({blocked.client_id})",
+            )
+        logger.info("Client %s blocked", blocked.client_id)
+
+    def unblock_client(self, client_id: str) -> BlockedClient | None:
+        """Allow a client again. Returns what was blocked, or None if it was not."""
+        blocked = self._blocked_clients.pop(client_id, None)
+        if blocked is None:
+            return None
+        if self._db is not None:
+            spawn(
+                self._db.delete_blocked_client(client_id),
+                f"delete_blocked_client({client_id})",
+            )
+        logger.info("Client %s unblocked", client_id)
+        return blocked
+
+    def is_client_blocked(self, client_id: str) -> bool:
+        return client_id in self._blocked_clients
+
+    def is_address_blocked(self, url: str, mdns_name: str | None = None) -> bool:
+        """Whether a discovered address belongs to a blocked client."""
+        return any(
+            blocked.matches_address(url, mdns_name) for blocked in self._blocked_clients.values()
+        )
+
+    def blocked_clients(self) -> list[BlockedClient]:
+        return list(self._blocked_clients.values())
+
+    def restore_blocked_client(self, blocked: BlockedClient) -> None:
+        """Seed a blocked client from persisted state."""
+        self._blocked_clients[blocked.client_id] = blocked
 
     def effective_endpoint_id(self, client_id: str) -> str | None:
         return self._assignments.get(client_id, self._default_endpoint_id)
