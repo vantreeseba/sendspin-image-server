@@ -269,6 +269,16 @@ class TestClientLifecycle:
         mgr.delete_client("c1")
         assert "c1" not in mgr._preset_assignments
 
+    def test_delete_removes_display_overrides(self):
+        mgr = _manager()
+        mgr.set_client_dither("c1", "atkinson")
+        mgr.set_client_palette("c1", "bw")
+        mgr.set_client_interval("c1", 60)
+        mgr.delete_client("c1")
+        assert "c1" not in mgr._client_dither
+        assert "c1" not in mgr._client_palette
+        assert "c1" not in mgr._client_interval
+
 
 # ---------------------------------------------------------------------------
 # client_info

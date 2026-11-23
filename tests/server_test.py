@@ -385,6 +385,22 @@ class TestClientTracking:
 
         assert frame.images.empty()
 
+    async def test_forgetting_a_connected_client_removes_it(self, running):
+        server, url = running
+        frame = Frame()
+        await frame.connect(url)
+        client_id = frame.client._client_id
+        try:
+            await _until(lambda: client_id in server.clients)
+
+            await server.forget_client(client_id)
+
+            assert client_id not in server.clients
+            assert server._sendspin.get_client(client_id) is None
+            server.registry.client_disconnected.assert_not_called()
+        finally:
+            await frame.client.disconnect()
+
 
 class TestIdentity:
     async def test_server_id_survives_a_restart(self, tmp_path):
@@ -442,6 +458,23 @@ class TestOutboundConnections:
             assert await asyncio.wait_for(reasons.get(), TIMEOUT) == "playback"
         finally:
             server.disconnect_from_client(url)
+
+    async def test_forgetting_a_dialled_client_stops_redialling_it(self, running, dialled_frame):
+        server, _url = running
+        url, reasons = dialled_frame
+        server.registry.locked_clients_with_urls.return_value = []
+        server.connect_to_client(url, mdns_name="frame")
+        await asyncio.wait_for(reasons.get(), TIMEOUT)
+        await _until(lambda: server.clients)
+        client_id = next(iter(server.clients))
+
+        await server.forget_client(client_id)
+
+        assert server.clients == {}
+        assert server.get_discovered_urls() == []
+        # The first retry would land after a one-second backoff.
+        await asyncio.sleep(1.5)
+        assert reasons.empty()
 
     async def test_unlocked_client_is_left_to_the_server_it_is_on(self, running, dialled_frame):
         server, _url = running

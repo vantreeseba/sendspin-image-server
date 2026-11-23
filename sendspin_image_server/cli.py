@@ -714,9 +714,7 @@ async def run(  # noqa: C901, PLR0913, PLR0915
         entry = next((c for c in clients if c["id"] == client_id), None)
         if entry is None:
             return web.Response(status=404, text="Client not found")
-        discovered_url = entry.get("discovered_url")
-        if discovered_url:
-            server.disconnect_from_client(discovered_url)
+        await server.forget_client(client_id, entry.get("discovered_url"))
         registry.delete_client(client_id)
         return web.Response(status=204)
 
