@@ -17,7 +17,7 @@ import {
 import { ClientDebugPreviewDialog } from '@/components/ClientDebugPreviewDialog';
 import { CardLayout } from '@/components/card-layout';
 import { Combobox } from '@/components/combobox';
-import { ConfirmButton } from '@/components/confirm-button';
+import { ForgetClientButton } from '@/components/ForgetClientButton';
 import { FormField } from '@/components/form-field';
 import { PropertyList, PropertyRow } from '@/components/property-list';
 import { Alert } from '@/components/ui/alert';
@@ -215,11 +215,11 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
     }
   }
 
-  async function handleDelete() {
+  async function handleForget(block: boolean) {
     setDeleting(true);
     setErr(null);
     try {
-      await deleteClient(client.id);
+      await deleteClient(client.id, block);
       onChanged();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -269,17 +269,10 @@ export function ClientCard({ client, endpoints, onChanged }: Props) {
               iconSlot={<Eye />}
               onClick={() => setDebugOpen(true)}
             />
-            <ConfirmButton
-              aria-label={`Forget ${displayName}`}
-              variant="destructive-outline"
-              size="xs"
-              content="Forget"
+            <ForgetClientButton
+              clientName={displayName}
               loading={deleting}
-              loadingLabel="Forgetting…"
-              title={`Forget client "${displayName}"?`}
-              description="It is disconnected and its saved provider, preset, lock and name are removed from the server. A client that is still on the network will be discovered again."
-              confirmLabel="Forget"
-              onConfirm={handleDelete}
+              onForget={handleForget}
             />
           </>
         }

@@ -72,6 +72,13 @@ export interface Client {
   last_image_over_budget?: boolean; // no encoding of the last image fit the budget
 }
 
+export interface BlockedClient {
+  client_id: string;
+  name: string;
+  url: string | null;
+  mdns_name: string | null;
+}
+
 export interface Endpoint {
   id: string;
   name: string;

@@ -1,7 +1,8 @@
 import { useCallback, useState } from 'react';
-import { getClients, getEndpoints, getPresets, updatePreset } from '@/api';
+import { getBlockedClients, getClients, getEndpoints, getPresets, updatePreset } from '@/api';
 import { AddDevicePresetDialog } from '@/components/AddDevicePresetDialog';
 import { AddEndpointDialog } from '@/components/AddEndpointDialog';
+import { BlockedClientsSection } from '@/components/BlockedClientsSection';
 import { ClientCard } from '@/components/ClientCard';
 import { DevicePresetCard } from '@/components/DevicePresetCard';
 import { EditDevicePresetDialog } from '@/components/EditDevicePresetDialog';
@@ -58,6 +59,7 @@ export default function App() {
   const fetchClients = useCallback(() => getClients(), []);
   const fetchEndpoints = useCallback(() => getEndpoints(), []);
   const fetchPresets = useCallback(() => getPresets(), []);
+  const fetchBlockedClients = useCallback(() => getBlockedClients(), []);
 
   const {
     data: clients,
@@ -67,11 +69,16 @@ export default function App() {
   } = usePoller(fetchClients, 5000);
   const { data: endpoints, refresh: refreshEndpoints } = usePoller(fetchEndpoints, 5000);
   const { data: presets, refresh: refreshPresets } = usePoller(fetchPresets, 5000);
+  const { data: blockedClients, refresh: refreshBlockedClients } = usePoller(
+    fetchBlockedClients,
+    5000,
+  );
 
   function refresh() {
     refreshClients();
     refreshEndpoints();
     refreshPresets();
+    refreshBlockedClients();
   }
 
   async function handleSaveEdit(updates: NewDevicePreset) {
@@ -197,6 +204,8 @@ export default function App() {
                   )
                 }
               />
+
+              <BlockedClientsSection blockedClients={blockedClients} onChanged={refresh} />
             </TabsContent>
           </Tabs>
         }

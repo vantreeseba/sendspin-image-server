@@ -16,7 +16,7 @@ from aiosendspin.models.artwork import ArtworkChannel
 from aiosendspin.models.types import ArtworkSource, PictureFormat
 
 from sendspin_image_server.assignments import ClientAssignmentManager
-from sendspin_image_server.client import ROLE_ARTWORK, ClientState
+from sendspin_image_server.client import ROLE_ARTWORK, BlockedClient, ClientState
 from sendspin_image_server.endpoints import LocalFolderEndpoint
 from sendspin_image_server.registry import DevicePreset
 
@@ -278,6 +278,39 @@ class TestClientLifecycle:
         assert "c1" not in mgr._client_dither
         assert "c1" not in mgr._client_palette
         assert "c1" not in mgr._client_interval
+
+    def test_forgetting_a_client_keeps_its_block(self):
+        mgr = _manager()
+        mgr.block_client(BlockedClient("c1", "Frame"))
+        mgr.delete_client("c1")
+        assert mgr.is_client_blocked("c1")
+
+    def test_unblock_returns_the_entry_and_allows_it(self):
+        mgr = _manager()
+        blocked = BlockedClient("c1", "Frame", url="ws://host/sendspin")
+        mgr.block_client(blocked)
+        assert mgr.unblock_client("c1") == blocked
+        assert not mgr.is_client_blocked("c1")
+        assert not mgr.is_address_blocked("ws://host/sendspin")
+
+    def test_unblocking_an_unknown_client_returns_none(self):
+        assert _manager().unblock_client("c1") is None
+
+    def test_address_matches_by_url_without_an_mdns_name(self):
+        mgr = _manager()
+        mgr.block_client(BlockedClient("c1", "Frame", url="ws://a/sendspin"))
+        assert mgr.is_address_blocked("ws://a/sendspin", "frame")
+        assert not mgr.is_address_blocked("ws://b/sendspin", "frame")
+
+    def test_mdns_name_follows_a_device_to_a_new_address(self):
+        mgr = _manager()
+        mgr.block_client(BlockedClient("c1", "Frame", url="ws://a/sendspin", mdns_name="frame"))
+        assert mgr.is_address_blocked("ws://b/sendspin", "frame")
+
+    def test_other_device_on_a_reused_address_is_not_blocked(self):
+        mgr = _manager()
+        mgr.block_client(BlockedClient("c1", "Frame", url="ws://a/sendspin", mdns_name="frame"))
+        assert not mgr.is_address_blocked("ws://a/sendspin", "kitchen")
 
 
 # ---------------------------------------------------------------------------

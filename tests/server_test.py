@@ -60,6 +60,8 @@ def _registry() -> MagicMock:
     registry = MagicMock()
     registry.effective_endpoint_id.return_value = None
     registry.client_max_image_bytes.return_value = IMAGE_ENCODING_DEFAULTS.max_image_bytes
+    registry.is_client_blocked.return_value = False
+    registry.is_address_blocked.return_value = False
     return registry
 
 
@@ -401,6 +403,24 @@ class TestClientTracking:
         finally:
             await frame.client.disconnect()
 
+    async def test_blocked_client_is_dropped_and_gets_no_image(self, running):
+        server, url = running
+        await server.broadcast_image(_image("red"))
+        server.registry.is_client_blocked.return_value = True
+        frame = Frame()
+        try:
+            await frame.connect(url)
+            client_id = frame.client._client_id
+            await _until(lambda: server._sendspin.get_client(client_id) is None)
+            await asyncio.sleep(0.2)
+
+            assert client_id not in server.clients
+            server.registry.ensure_client.assert_not_called()
+        finally:
+            await frame.client.disconnect()
+
+        assert frame.images.empty()
+
 
 class TestIdentity:
     async def test_server_id_survives_a_restart(self, tmp_path):
@@ -475,6 +495,17 @@ class TestOutboundConnections:
         # The first retry would land after a one-second backoff.
         await asyncio.sleep(1.5)
         assert reasons.empty()
+
+    async def test_blocked_address_is_not_dialled(self, running, dialled_frame):
+        server, _url = running
+        url, reasons = dialled_frame
+        server.registry.is_address_blocked.return_value = True
+
+        server.connect_to_client(url, mdns_name="frame")
+
+        await asyncio.sleep(0.2)
+        assert reasons.empty()
+        assert server.get_discovered_urls() == []
 
     async def test_unlocked_client_is_left_to_the_server_it_is_on(self, running, dialled_frame):
         server, _url = running

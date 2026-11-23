@@ -274,8 +274,11 @@ class SendspinImageServer:
         awake window.
 
         A locked client is asked to switch to this server even if another one
-        already has it.
+        already has it. A blocked client is not dialled.
         """
+        if self._registry is not None and self._registry.is_address_blocked(url, mdns_name):
+            logger.debug("Not connecting to blocked client at %s", url)
+            return
         reason = (
             ConnectionReason.PLAYBACK if self._is_locked_url(url) else ConnectionReason.DISCOVERY
         )
@@ -319,6 +322,15 @@ class SendspinImageServer:
             self._sendspin.disconnect_from_client(url)
         self._discovered_clients.pop(url, None)
         self._discovered_client_names.pop(url, None)
+
+    def client_address(
+        self, client_id: str, url: str | None = None
+    ) -> tuple[str | None, str | None]:
+        """Return a client's URL and mDNS name; `url` is used if it has no live one."""
+        live_url = self._sendspin.get_client_url(client_id) if self._sendspin else None
+        address = live_url or url
+        mdns_name = self._discovered_client_names.get(address) if address else None
+        return address, mdns_name
 
     async def forget_client(self, client_id: str, url: str | None = None) -> None:
         """Close a client's connection, stop dialling it, and drop it from the server.
@@ -407,7 +419,7 @@ class SendspinImageServer:
     def _on_server_event(self, server: SendspinServer, event: SendspinEvent) -> None:
         if isinstance(event, ClientConnectedEvent):
             client = server.get_client(event.client_id)
-            if client is not None:
+            if client is not None and not self._reject_if_blocked(event.client_id):
                 self._track_connection(client)
         elif isinstance(event, ClientDisconnectedEvent):
             self._forget_connection(event.client_id)
@@ -424,6 +436,14 @@ class SendspinImageServer:
             asyncio.get_running_loop().call_soon(
                 self._on_artwork_stream_started, group, event.role
             )
+
+    def _reject_if_blocked(self, client_id: str) -> bool:
+        """Drop a blocked client that reached the server. Returns whether it was blocked."""
+        if self._registry is None or not self._registry.is_client_blocked(client_id):
+            return False
+        logger.info("Rejecting blocked client %s", client_id)
+        self._spawn(self.forget_client(client_id))
+        return True
 
     def _track_connection(self, client: SendspinClient) -> None:
         """Set up state for a client's current connection, once per connection."""
@@ -529,6 +549,8 @@ class SendspinImageServer:
         if client is None:
             return
         client_id = client.client_id
+        if self._reject_if_blocked(client_id):
+            return
         self._track_connection(client)
         # A fresh state per stream: the feed loops serve a client they have not
         # seen before right away.

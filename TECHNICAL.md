@@ -298,7 +298,9 @@ All JSON request bodies must have `Content-Type: application/json`. Responses ar
 | `POST`   | `/api/clients/{id}/palette`      | `{"dither_palette": "<palette>"}`                | 204      | Set the dithering palette for a client |
 | `POST`   | `/api/clients/{id}/interval`     | `{"interval": <seconds>}` (`0` = server default)| 204      | Set the slideshow interval for a client |
 | `POST`   | `/api/clients/{id}/connect`      | —                                                | 204      | Force an immediate reconnect attempt to this client |
-| `DELETE` | `/api/clients/{id}`              | —                                                | 204      | Forget this client entirely (removes from DB and in-memory state) |
+| `DELETE` | `/api/clients/{id}`              | —                                                | 204      | Forget this client and block it; add `?block=false` to let it be discovered again |
+| `GET`    | `/api/blocked-clients`           | —                                                | 200 JSON array | List blocked clients |
+| `DELETE` | `/api/blocked-clients/{id}`      | —                                                | 204      | Unblock a client and dial its last-known URL |
 
 ### Image Providers (Endpoints)
 
