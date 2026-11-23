@@ -55,6 +55,8 @@ logger = logging.getLogger(__name__)
 # it has paired with or approved, across restarts.
 IDENTITY_FILE = "sendspin_identity.key"
 PAIRING_FILE = "sendspin_pairing.json"
+# How long Forget waits for a client to acknowledge its socket closing.
+_FORGET_CLOSE_TIMEOUT_S = 1.0
 
 
 @dataclass
@@ -317,6 +319,35 @@ class SendspinImageServer:
             self._sendspin.disconnect_from_client(url)
         self._discovered_clients.pop(url, None)
         self._discovered_client_names.pop(url, None)
+
+    async def forget_client(self, client_id: str, url: str | None = None) -> None:
+        """Close a client's connection, stop dialling it, and drop it from the server.
+
+        `url` is its last-known address, for a client that is not connected now.
+        """
+        # Dropped before closing, so the close is not recorded as the client
+        # going offline, which would bring its card straight back.
+        self._clients.pop(client_id, None)
+        self._connections.pop(client_id, None)
+        self._announced.discard(client_id)
+
+        live_url = self._sendspin.get_client_url(client_id) if self._sendspin else None
+        for known_url in {url, live_url}:
+            if known_url is not None:
+                self.disconnect_from_client(known_url)
+
+        if self._sendspin is None:
+            return
+        client = self._sendspin.get_client(client_id)
+        if client is not None and client.connection is not None:
+            # Closing the socket lets aiosendspin's handler finish. Its disconnect()
+            # leaves an inbound handler waiting forever in 10.0.0, stalling shutdown.
+            try:
+                async with asyncio.timeout(_FORGET_CLOSE_TIMEOUT_S):
+                    await client.connection.websocket_connection.close()
+            except TimeoutError:
+                logger.debug("Timed out closing the socket of forgotten client %s", client_id)
+        await self._sendspin.remove_client(client_id)
 
     def get_discovered_urls(self) -> list[dict[str, str | None]]:
         """Return all tracked URLs with their known client_id and mDNS name (if any)."""
